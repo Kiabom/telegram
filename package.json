@@ -1,0 +1,16 @@
+{
+  "name": "telegram-lunch-expense-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ربات رایگان مدیریت بازپرداخت هزینه ناهار کارکنان روی Telegram + Google Apps Script + Google Sheets (همه مبالغ به ریال)",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "test:bundle": "npm run bundle && LUNCHBOT_SRC=dist node --test tests/*.test.js",
+    "bundle": "node scripts/bundle.js",
+    "check": "node scripts/check-syntax.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED"
+}

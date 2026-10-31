@@ -1,0 +1,17 @@
+# نمونه Script Properties (Project Settings → Script Properties)
+# ⚠️ مقادیر واقعی را هرگز در مخزن کد، شیت یا پیام قرار ندهید.
+
+# الزامی — توکن رباتی که از @BotFather گرفته‌اید
+BOT_TOKEN=123456789:AAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# الزامی — Telegram ID عددی مالک(های) ربات، با کاما جدا شوند
+OWNER_TELEGRAM_IDS=111111111
+
+# الزامی پس از Deploy — آدرس Web App که با /exec تمام می‌شود
+WEB_APP_URL=https://script.google.com/macros/s/AKfycb.../exec
+
+# اختیاری — فقط اگر AI را روشن می‌کنید (کلید Gemini API بدون فعال‌سازی Billing)
+GEMINI_API_KEY=
+
+# این‌ها توسط setup() خودکار ساخته می‌شوند؛ دستی تغییر ندهید:
+# SPREADSHEET_ID, ROOT_FOLDER_ID, DOCS_FOLDER_ID, REPORTS_FOLDER_ID, WEBHOOK_SECRET, BOT_USERNAME, UPDATE_MODE, POLL_OFFSET
