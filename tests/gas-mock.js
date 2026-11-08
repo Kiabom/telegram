@@ -363,13 +363,14 @@ function createEnv(opts = {}) {
     const p = chainProxy({
       setText: (t) => { item.text = t; return undefined; }, // مثل Docs واقعی: void
       getText: () => item.text,
-      editAsText: () => chainProxy({}),
+      editAsText: () => chainProxy({ getText: () => item.text }),
       asParagraph: () => p
     });
     return p;
   };
   const DocumentApp = {
     HorizontalAlignment: { LEFT: 'LEFT', CENTER: 'CENTER', RIGHT: 'RIGHT' },
+    VerticalAlignment: { TOP: 'TOP', CENTER: 'CENTER', BOTTOM: 'BOTTOM' },
     create: (name) => {
       const id = 'doc' + (SS_SEQ++) + '_' + crypto.randomBytes(3).toString('hex');
       const doc = { id, name, content: [], closed: false };

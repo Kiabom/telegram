@@ -160,6 +160,7 @@ function Rep_summaryText_(m) {
     'در انتظار بررسی: ' + Utils_faDigits_(s.counts.PENDING) + ' مورد (تخمینی ' + Utils_formatRial_(s.pendingEstimate) + '؛ جزو جمع قابل پرداخت نیست)',
     'ردشده: ' + Utils_faDigits_(s.counts.REJECTED) + ' | ناقص/نیازمند اصلاح: ' + Utils_faDigits_(s.counts.INCOMPLETE)
   ];
+  if (m.include_audit) L.push('📎 پیوست PDF: ' + Utils_faDigits_((m.evidence_pages || []).length) + ' تصویر (فاکتور غذا، رسید پرداخت، رسید واریز)');
   if (m.payouts.length) {
     L.push('');
     L.push('<b>دریافت‌کنندگان وجه:</b>');
@@ -227,7 +228,7 @@ function Rep_command_(ctx, kind, args) {
     try {
       var model = Rep_build_(from, to, {
         includeAudit: includeAudit, type: type, generatedBy: actor,
-        includeEvidence: includeAudit && type === 'DAILY' && Settings_bool_('REPORT_PDF_EVIDENCE')
+        includeEvidence: includeAudit && (type === 'DAILY' || from === to) && Settings_bool_('REPORT_PDF_EVIDENCE')
       });
       var files = Rep_generate_(model);
       Rep_sendTo_(chatId, model, files);
@@ -285,32 +286,45 @@ function Rep_listArchive_(ctx) {
 }
 
 /**
- * صفحات پیوست مدارک برای PDF روزانه: برای هر درخواست ثبت‌شده (به‌جز لغوشده/پیش‌نویس)،
- * ابتدا مدارک خرید و سپس مدارک پرداخت، با توضیح (کپشن) کارمند.
+ * صفحات پیوست مدارک برای PDF روزانه: برای هر درخواست ثبت‌شده (به‌جز لغوشده/پیش‌نویس) به ترتیب
+ * ۱) فاکتور/رسید غذا ۲) رسید پرداخت کارمند ۳) رسید واریز شرکت به کارمند (اگر ادمین آپلود کرده باشد)،
+ * همراه توضیح (کپشن) ارسال‌کننده.
  */
 function Rep_evidencePages_(reqs, bensBy, docsBy) {
   var max = Settings_int_('REPORT_PDF_MAX_IMAGES') || 150;
+  var payBy = {};
+  Db_all_(SHEETS.PAYMENTS).forEach(function (p) { if (p.status !== 'CANCELLED') payBy[p.request_id] = p; });
+  var groups = [
+    { kinds: [DOC_KIND.PURCHASE], title: 'فاکتور / رسید غذا', section: 'FOOD' },
+    { kinds: PAYMENT_DOC_KINDS, title: 'رسید پرداخت کارمند', section: 'EMPLOYEE_PAYMENT' },
+    { kinds: [DOC_KIND.PAYOUT_RECEIPT], title: 'رسید واریز شرکت به کارمند', section: 'PAYOUT' }
+  ];
   var pages = [];
   reqs.forEach(function (r) {
     if (r.status === STATUS.CANCELLED || DRAFT_STATUSES.indexOf(r.status) >= 0) return;
-    var docs = (docsBy[r.request_id] || []).filter(function (d) { return d.document_kind !== DOC_KIND.VOICE_NOTE; });
-    var ordered = docs.filter(function (d) { return d.document_kind === DOC_KIND.PURCHASE; })
-      .concat(docs.filter(function (d) { return PAYMENT_DOC_KINDS.indexOf(d.document_kind) >= 0; }));
+    var docs = docsBy[r.request_id] || [];
     var bens = (bensBy[r.request_id] || []).map(function (b) { return b.employee_name_snapshot; }).join('، ');
-    ordered.forEach(function (d) {
-      var sameKind = ordered.filter(function (x) { return (x.document_kind === DOC_KIND.PURCHASE) === (d.document_kind === DOC_KIND.PURCHASE); });
-      pages.push({
-        document_id: d.document_id, request_id: r.request_id,
-        kind_fa: d.document_kind === DOC_KIND.PURCHASE ? 'فاکتور / رسید غذا' : DOC_KIND_FA[d.document_kind],
-        index: sameKind.indexOf(d) + 1, count: sameKind.length,
-        date_fa: Jal_formatLong_(r.order_date_iso), status: STATUS_FA[r.status] || r.status,
-        payer: Emp_name_(r.payer_employee_id), beneficiaries: bens,
-        claimed: r.claimed_total_rial, approved: (r.status === STATUS.APPROVED || r.status === STATUS.PAID) ? r.approved_reimbursement_rial : 0,
-        merchant: [r.merchant, r.merchant_order_id].filter(Boolean).join(' — '),
-        caption: d.caption || '', uploaded_fa: Jal_formatDateTimeFa_(d.uploaded_at),
-        uploaded_by: (Emp_byTelegramId_(d.uploaded_by) || {}).full_name_fa || String(d.uploaded_by || ''),
-        drive_file_id: d.drive_file_id, telegram_file_id: d.telegram_file_id, mime_type: d.mime_type, file_size: d.file_size,
-        isImage: String(d.mime_type || '').indexOf('image/') === 0
+    var pay = payBy[r.request_id] || null;
+    groups.forEach(function (g) {
+      var list = docs.filter(function (d) { return g.kinds.indexOf(d.document_kind) >= 0; });
+      list.forEach(function (d, i) {
+        pages.push({
+          document_id: d.document_id, request_id: r.request_id, section: g.section,
+          kind_fa: g.section === 'EMPLOYEE_PAYMENT' ? DOC_KIND_FA[d.document_kind] : g.title,
+          index: i + 1, count: list.length,
+          date_fa: Jal_formatLong_(r.order_date_iso), status: STATUS_FA[r.status] || r.status,
+          channel: CHANNEL_FA[r.purchase_channel] || '', payment: PAY_METHOD_FA[r.payment_method] || '',
+          payer: Emp_name_(r.payer_employee_id), beneficiaries: bens,
+          claimed: r.claimed_total_rial, approved: (r.status === STATUS.APPROVED || r.status === STATUS.PAID) ? r.approved_reimbursement_rial : 0,
+          merchant: [r.merchant, r.merchant_order_id].filter(Boolean).join(' — '),
+          caption: d.caption || '', uploaded_fa: Jal_formatDateTimeFa_(d.uploaded_at),
+          uploaded_by: (Emp_byTelegramId_(d.uploaded_by) || {}).full_name_fa || String(d.uploaded_by || ''),
+          paid_amount: pay && pay.status === 'PAID' ? pay.amount_rial : 0,
+          paid_at_fa: pay && pay.paid_at ? Jal_formatDateTimeFa_(pay.paid_at) : '',
+          paid_ref: pay ? pay.transaction_reference_optional || '' : '',
+          drive_file_id: d.drive_file_id, telegram_file_id: d.telegram_file_id, mime_type: d.mime_type, file_size: d.file_size,
+          isImage: String(d.mime_type || '').indexOf('image/') === 0
+        });
       });
     });
   });

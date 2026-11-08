@@ -79,10 +79,12 @@ test('فرمان /dailyreport: فایل XLSX و PDF واقعی ساخته، با
   assert.equal(pdf.kind, 'document');
   assert.equal(pdf.closed, true);
   const pdfSheet = pdf.content.map((c) => c.text || (c.cells ? c.cells.map((r) => r.join(' ')).join('\n') : '')).join('\n');
-  assert.match(pdfSheet, /فهرست دریافت‌کنندگان وجه/);
+  assert.match(pdfSheet, /صورت پرداخت به دریافت‌کنندگان وجه/);
+  assert.match(pdfSheet, /جمع کل/);
   assert.match(pdfSheet, /۱۲٬۵۰۰٬۰۰۰/);
   assert.match(pdfSheet, /authenticity_not_verified/);
-  assert.match(pdfSheet, /تأییدکننده\(ها\): مریم مالی/);
+  assert.match(pdfSheet, /مریم مالی/);
+  assert.match(pdfSheet, /امضا و تاریخ/);
   const archive = bot.rows('ReportsArchive');
   assert.equal(archive.length, 1);
   assert.equal(archive[0].totals_json.summary.approved, 13500000);
@@ -110,17 +112,22 @@ test('PDF روزانه ادمین: هر فاکتور غذا و رسید پردا
     assert.equal(c.slice(b, end).filter((x) => x.type === 'image').length, 1);
   });
   // ترتیب و توضیحات: ابتدا فاکتورهای غذا و سپس رسید پرداخت همان درخواست
-  const headers = c.filter((x) => x.type === 'p' && /^پیوست مدرک/.test(x.text)).map((x) => x.text);
-  assert.match(headers[0], /فاکتور \/ رسید غذا \(۱ از ۲\)/);
-  assert.match(headers[1], /فاکتور \/ رسید غذا \(۲ از ۲\)/);
-  assert.match(headers[2], /رسید پرداخت بانکی/);
-  const text = c.filter((x) => x.type === 'p').map((x) => x.text).join('\n');
-  assert.match(text, new RegExp('درخواست ' + rid));
-  assert.match(text, /توضیح کارمند: فاکتور/);
-  assert.match(text, /افراد: علی احمدی، محمد رضایی/);
-  assert.match(text, /مبلغ فاکتور: ۴٬۰۰۰٬۰۰۰ ریال/);
+  const cellText = (x) => (x.cells ? x.cells.map((r) => r.join(' | ')).join('\n') : x.text || '');
+  const headers = c.filter((x) => x.type === 'table' && x.cells.length === 1 && /^پیوست /.test(x.cells[0][0])).map((x) => x.cells[0][0]);
+  assert.equal(headers.length, 5);
+  const i1 = headers.findIndex((h) => /فاکتور \/ رسید غذا \(۱ از ۲\)/.test(h));
+  assert.ok(i1 >= 0);
+  assert.match(headers[i1 + 1], /فاکتور \/ رسید غذا \(۲ از ۲\)/);
+  assert.match(headers[i1 + 2], /رسید پرداخت بانکی/);
+  assert.match(headers[0], /^پیوست ۱ از ۵ — /);
+  const text = c.map(cellText).join('\n');
+  assert.match(text, new RegExp(rid));
+  assert.match(text, /توضیح ارسال‌کننده/);
+  assert.match(text, /فاکتور \| توضیح ارسال‌کننده/);
+  assert.match(text, /علی احمدی، محمد رضایی/);
+  assert.match(text, /۴٬۰۰۰٬۰۰۰/);
   // بزرگ و خوانا: تصویر ۸۰۰×۱۲۰۰ به ارتفاع کامل ناحیه چاپ (۶۰۰pt) رسانده می‌شود
-  assert.deepEqual([images[0].w, images[0].h], [400, 600]);
+  assert.deepEqual([images[0].w, images[0].h], [347, 520]);
   // ناظر گزارش پیوست مدارک دریافت نمی‌کند
   bot.send(U.viewer, '/dailyreport');
   const vpdf = bot.env.exports.filter((e) => e.kind === 'document').pop();
@@ -378,4 +385,23 @@ test('ثبت پرداخت با عکس رسید بانکی: رسید ذخیره �
   }
   assert.ok(bot.chat(U.ali).some((m) => /پرداخت شد/.test(m.text)));
   assert.equal(bot.rows('Payments').length, 1);
+});
+
+test('PDF روزانه: رسید واریز شرکت به کارمند هم بعد از فاکتور و رسید پرداخت می‌آید', () => {
+  const bot = createStandardBot();
+  const rid = submitRequest(bot, { user: U.ali, total: '2000000 ریال' });
+  approve(bot, rid);
+  bot.click(U.admin, 'ثبت پرداخت‌شده');
+  bot.click(U.admin, 'ثبت با عکس رسید بانکی');
+  bot.photo(U.admin, { fileId: 'PAYOUTX', caption: '555111' });
+  bot.send(U.admin, '/dailyreport');
+  const c = bot.env.exports.filter((e) => e.kind === 'document').pop().content;
+  const heads = c.filter((x) => x.type === 'table' && x.cells.length === 1 && /^پیوست /.test(x.cells[0][0])).map((x) => x.cells[0][0]);
+  assert.equal(heads.length, 3);
+  assert.match(heads[0], /فاکتور \/ رسید غذا/);
+  assert.match(heads[1], /رسید پرداخت بانکی/);
+  assert.match(heads[2], /رسید واریز شرکت به کارمند/);
+  const all = c.map((x) => (x.cells ? x.cells.map((r) => r.join(' ')).join(' ') : x.text || '')).join('\n');
+  assert.match(all, /شماره پیگیری[\s\S]*555111/);
+  assert.match(bot.texts(U.admin).join('\n'), /پیوست PDF: ۳ تصویر/);
 });

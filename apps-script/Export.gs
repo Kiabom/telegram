@@ -197,13 +197,19 @@ function Exp_finishTable_(sheet, cols, widths) {
 }
 
 /**
- * PDF گزارش به‌صورت Google Doc ساخته و Export می‌شود تا در یک فایل واحد بیاید:
- *  ۱) صفحات گزارش (خلاصه، دریافت‌کنندگان وجه، جزئیات سفارش‌ها، امضا)
- *  ۲) در گزارش روزانه ادمین: پیوست مدارک — هر تصویر (فاکتور غذا و رسید پرداخت) در یک صفحه جدا،
- *     بزرگ و قابل چاپ، همراه مشخصات سفارش و توضیحی که کارمند هنگام ثبت نوشته است.
+ * PDF گزارش به‌صورت Google Doc ساخته و یک‌جا Export می‌شود (A4 عمودی، راست‌به‌چپ، قالب حسابداری):
+ *  صفحه گزارش: سربرگ، مشخصات گزارش، کارت‌های جمع مالی، صورت پرداخت به دریافت‌کنندگان وجه،
+ *  دفتر سفارش‌ها، موارد باز، جدول امضا.
+ *  پیوست (گزارش روزانه ادمین): هر تصویر در یک صفحه — فاکتور غذا، رسید پرداخت کارمند و رسید
+ *  واریز شرکت — با جدول مشخصات و توضیح ارسال‌کننده.
  */
-var PDF_PAGE_ = { W: 595.28, H: 841.89, MARGIN: 36 };
-var PDF_IMAGE_MAX_ = { W: 523, H: 600, UPSCALE: 2 };
+var PDF_PAGE_ = { W: 595.28, H: 841.89, MARGIN: 34 };
+var PDF_CONTENT_W_ = 527;
+var PDF_IMAGE_MAX_ = { W: 515, H: 520, UPSCALE: 2 };
+var PDF_COLOR_ = {
+  NAVY: '#1F3B6E', NAVY_TEXT: '#FFFFFF', HEAD: '#DCE4F2', ZEBRA: '#F5F7FB', TOTAL: '#E3EAF6',
+  BORDER: '#9AA8BF', MUTED: '#5A6478', GOOD: '#1B7F3B', WARN: '#B45309', LABEL: '#EEF2F8'
+};
 
 function Exp_buildPdfDoc_(m, folder, base) {
   var font = Settings_str_('REPORT_FONT') || 'Vazirmatn';
@@ -213,91 +219,200 @@ function Exp_buildPdfDoc_(m, folder, base) {
   var body = doc.getBody();
   body.setPageWidth(PDF_PAGE_.W).setPageHeight(PDF_PAGE_.H)
     .setMarginTop(PDF_PAGE_.MARGIN).setMarginBottom(PDF_PAGE_.MARGIN).setMarginLeft(PDF_PAGE_.MARGIN).setMarginRight(PDF_PAGE_.MARGIN);
-  var first = true;
-  function para(text, size, bold, center, color) {
-    var p;
-    if (first) { p = body.getParagraphs()[0]; p.setText(text); } else p = body.appendParagraph(text);
-    first = false;
-    p.setLeftToRight(false).setAlignment(center ? DocumentApp.HorizontalAlignment.CENTER : DocumentApp.HorizontalAlignment.RIGHT);
-    var t = p.editAsText();
-    if (text) t.setFontFamily(font).setFontSize(size || 9).setBold(!!bold).setForegroundColor(color || '#000000');
-    return p;
-  }
-  function line(text, style) {
-    if (style === 'title') return para(text, 15, true, true);
-    if (style === 'sub') return para(text, 9, false, true, '#555555');
-    if (style === 'h') return para(text, 11, true, false, '#1F3B6E');
-    if (style === 'note') return para(text, 8, false, false, '#444444');
-    return para(text, 9);
-  }
-  function table(headers, data) {
-    // جدول‌های Docs جهت راست‌به‌چپ ندارند؛ ستون‌ها معکوس می‌شوند تا ستون اول سمت راست باشد.
-    var cells = [headers].concat(data).map(function (r) {
-      return r.map(function (v) { return v === null || v === undefined ? '' : String(v); }).reverse();
-    });
-    var t = body.appendTable(cells);
-    t.setBorderColor('#999999');
-    for (var i = 0; i < cells.length; i++) {
-      var row = t.getRow(i);
-      for (var j = 0; j < cells[i].length; j++) {
-        var cell = row.getCell(j);
-        if (i === 0) cell.setBackgroundColor(EXP_HEADER_BG_);
-        var p = cell.getChild(0).asParagraph();
-        p.setLeftToRight(false).setAlignment(i === 0 ? DocumentApp.HorizontalAlignment.CENTER : DocumentApp.HorizontalAlignment.RIGHT);
-        if (cells[i][j]) p.editAsText().setFontFamily(font).setFontSize(8).setBold(i === 0);
-      }
-    }
-    return t;
-  }
+  var R = Exp_pdfRenderer_(body, font);
   var F = Utils_formatNumberFa_;
   var s = m.summary;
-  line(m.title, 'title');
-  line('زمان تهیه: ' + Jal_formatDateTimeFa_(m.generated_at) + ' (وقت تهران)  |  واحد همه مبالغ: ریال', 'sub');
-  line('خلاصه مالی', 'h');
-  table(['شاخص', 'مقدار', 'شاخص', 'مقدار'], [
-    ['سفارش‌های ثبت‌شده', F(s.orders), 'افراد یکتا (تأییدشده)', F(s.uniqueBeneficiariesApproved)],
-    ['مبلغ کل فاکتورها', F(s.claimed), 'مبلغ واجد شرایط', F(s.eligible)],
-    ['مبلغ تأییدشده', F(s.approved), 'پرداخت‌شده', F(s.paid)],
-    ['قابل واریز (پرداخت‌نشده)', F(s.unpaid), 'در انتظار بررسی (تخمینی)', F(s.pendingEstimate)],
-    ['در انتظار بررسی (تعداد)', F(s.counts.PENDING), 'ردشده / ناقص', F(s.counts.REJECTED) + ' / ' + F(s.counts.INCOMPLETE)]
+
+  R.banner(m.title, 'گزارش بازپرداخت هزینه ناهار کارکنان — همه مبالغ به ریال');
+  R.kv([
+    ['تاریخ گزارش', m.from === m.to ? Jal_formatLong_(m.from) : Jal_formatLong_(m.from, false) + ' تا ' + Jal_formatLong_(m.to, false)],
+    ['زمان تهیه', Jal_formatDateTimeFa_(m.generated_at) + ' (تهران)'],
+    ['تهیه‌کننده', m.generated_by === 'SCHEDULER' ? 'زمان‌بندی خودکار' : Adm_actorName_(m.generated_by) || '—'],
+    ['واحد مبالغ', 'ریال (IRR)']
+  ], 4);
+  R.heading('۱. خلاصه مالی');
+  R.cards([
+    ['مبلغ کل فاکتورها', F(s.claimed)], ['مبلغ واجد شرایط', F(s.eligible)],
+    ['مبلغ تأییدشده', F(s.approved)], ['پرداخت‌شده', F(s.paid)],
+    ['مانده قابل واریز', F(s.unpaid)], ['در انتظار بررسی (تخمینی)', F(s.pendingEstimate)],
+    ['تعداد سفارش‌ها', F(s.orders)], ['افراد یکتا (تأییدشده)', F(s.uniqueBeneficiariesApproved)]
   ]);
-  line('فهرست دریافت‌کنندگان وجه (کل مبلغ هر سفارش به پرداخت‌کننده همان سفارش)', 'h');
-  table(['ردیف', 'پرداخت‌کننده', 'تعداد', 'شناسه درخواست‌ها', 'تأییدشده (ریال)', 'پرداخت‌شده (ریال)', 'قابل واریز (ریال)', 'وضعیت'],
+  R.heading('۲. صورت پرداخت به دریافت‌کنندگان وجه');
+  R.note('کل مبلغ مجاز هر سفارش به پرداخت‌کننده همان سفارش تعلق می‌گیرد؛ سقف روزانه هر نفر جداگانه کنترل شده است.');
+  R.table(['ردیف', 'دریافت‌کننده وجه', 'تعداد', 'شناسه درخواست‌ها', 'تأییدشده', 'پرداخت‌شده', 'مانده', 'وضعیت'],
     m.payouts.map(function (p, i) {
-      return [F(i + 1), p.payer_name, F(p.count), p.request_ids.join('، '), F(p.approved), F(p.paid), F(p.unpaid), p.unpaid ? 'در انتظار واریز' : 'پرداخت‌شده'];
-    }).concat([['', 'جمع', F(Exp_sum_(m.payouts, 'count')), '', F(Exp_sum_(m.payouts, 'approved')), F(Exp_sum_(m.payouts, 'paid')), F(Exp_sum_(m.payouts, 'unpaid')), '']]));
-  line('جزئیات سفارش‌ها', 'h');
-  table(['شناسه', 'تاریخ', 'پرداخت‌کننده', 'افراد', 'فاکتور (ریال)', 'تأییدشده (ریال)', 'وضعیت', 'مدارک'],
+      return [F(i + 1), p.payer_name, F(p.count), p.request_ids.join('\n'), F(p.approved), F(p.paid), F(p.unpaid), p.unpaid ? 'در انتظار واریز' : 'تسویه‌شده'];
+    }),
+    { widths: [30, 92, 38, 100, 70, 70, 62, 65], numeric: [0, 2, 4, 5, 6], total: ['', 'جمع کل', F(Exp_sum_(m.payouts, 'count')), '', F(Exp_sum_(m.payouts, 'approved')), F(Exp_sum_(m.payouts, 'paid')), F(Exp_sum_(m.payouts, 'unpaid')), ''],
+      empty: 'در این بازه پرداخت تأییدشده‌ای وجود ندارد.' });
+  R.heading('۳. دفتر سفارش‌ها');
+  R.table(['شناسه', 'تاریخ', 'پرداخت‌کننده', 'افراد', 'مبلغ فاکتور', 'تأییدشده', 'وضعیت', 'مدارک'],
     m.orders.filter(function (x) { return x.group !== 'CANCELLED'; }).map(function (x) {
       return [x.request_id, Utils_faDigits_(x.jdate), x.payer, x.beneficiaries, F(x.claimed), F(x.approved), x.status, Utils_faDigits_(x.docs)];
-    }));
+    }),
+    { widths: [78, 52, 70, 100, 62, 62, 60, 43], numeric: [1, 4, 5], fontSize: 7.5,
+      total: ['جمع', '', '', '', F(Exp_sum_(m.orders.filter(function (x) { return x.group !== 'CANCELLED' && x.group !== 'INCOMPLETE'; }), 'claimed')), F(Exp_sum_(m.orders, 'approved')), '', ''],
+      empty: 'سفارشی در این بازه ثبت نشده است.' });
   if (m.pending_rejected.length) {
-    line('موارد در انتظار، ردشده یا ناقص (جزو جمع قابل پرداخت نیستند)', 'h');
-    table(['شناسه', 'تاریخ', 'پرداخت‌کننده', 'وضعیت', 'فاکتور (ریال)', 'تخمینی (ریال)', 'دلیل / توضیح'],
-      m.pending_rejected.map(function (x) { return [x.request_id, Utils_faDigits_(x.jdate), x.payer, x.status, F(x.claimed), F(x.calculated), x.reason]; }));
+    R.heading('۴. موارد باز، ردشده یا ناقص (جزو جمع قابل پرداخت نیستند)');
+    R.table(['شناسه', 'تاریخ', 'پرداخت‌کننده', 'وضعیت', 'مبلغ فاکتور', 'تخمینی', 'دلیل / توضیح'],
+      m.pending_rejected.map(function (x) { return [x.request_id, Utils_faDigits_(x.jdate), x.payer, x.status, F(x.claimed), F(x.calculated), x.reason || '—']; }),
+      { widths: [80, 52, 75, 80, 65, 60, 115], numeric: [1, 4, 5], fontSize: 7.5 });
   }
-  line('وضعیت مدارک: برای هر سفارش، تعداد مدرک خرید و پرداخت در ستون «مدارک» آمده است. اصالت تصاویر رسید توسط سیستم تأیید نشده است (authenticity_not_verified) و مسئولیت تطبیق با ادمین مالی است.', 'note');
-  line('تأییدکننده(ها): ' + (m.approvers.length ? m.approvers.join('، ') : '—') + '          امضا: ______________________', 'note');
-  if (m.evidence_pages && m.evidence_pages.length) {
-    line('پیوست مدارک: در صفحات بعد، هر تصویر فاکتور غذا و رسید پرداخت در یک صفحه جداگانه آمده است (' +
-      F(m.evidence_pages.length) + ' تصویر).', 'note');
-    Exp_appendEvidencePages_(body, m.evidence_pages, para);
-  }
+  R.heading('تأیید و امضا');
+  R.signatures(m.approvers.length ? m.approvers.join('، ') : '—');
+  R.note('اصالت تصاویر رسید توسط سیستم تأیید نشده است (authenticity_not_verified)؛ تطبیق نهایی مدارک با ادمین مالی است.' +
+    (m.evidence_pages && m.evidence_pages.length ? ' پیوست مدارک: ' + F(m.evidence_pages.length) + ' تصویر در صفحات بعد.' : ''));
+  if (m.evidence_pages && m.evidence_pages.length) Exp_appendEvidencePages_(body, m.evidence_pages, R);
   doc.saveAndClose();
   return { doc: doc, file: tmp };
 }
 
-/** هر مدرک در یک صفحه: مشخصات سفارش + توضیح کارمند + تصویر بزرگ وسط صفحه. */
-function Exp_appendEvidencePages_(body, pages, para) {
+/** ابزار رسم: پاراگراف، سربرگ، جدول کلید/مقدار، کارت‌ها، جدول داده با سطر جمع، امضا. */
+function Exp_pdfRenderer_(body, font) {
+  var C = PDF_COLOR_;
+  var first = true;
+  var DA = DocumentApp;
+  function styleText(el, size, bold, color) {
+    var t = el.editAsText();
+    if (t.getText && !t.getText()) return;
+    t.setFontFamily(font).setFontSize(size).setBold(!!bold).setForegroundColor(color || '#000000');
+  }
+  function para(text, size, bold, align, color, before, after) {
+    var p;
+    if (first) { p = body.getParagraphs()[0]; p.setText(text); first = false; } else p = body.appendParagraph(text);
+    p.setLeftToRight(false).setAlignment(align || DA.HorizontalAlignment.RIGHT).setSpacingBefore(before || 0).setSpacingAfter(after || 0);
+    if (text) styleText(p, size || 9, bold, color);
+    return p;
+  }
+  function cellStyle(cell, text, o) {
+    o = o || {};
+    if (o.bg) cell.setBackgroundColor(o.bg);
+    cell.setPaddingTop(o.pad || 3).setPaddingBottom(o.pad || 3).setPaddingLeft(4).setPaddingRight(4);
+    if (cell.setVerticalAlignment && DA.VerticalAlignment) cell.setVerticalAlignment(DA.VerticalAlignment.CENTER);
+    var p = cell.getChild(0).asParagraph();
+    p.setLeftToRight(false).setAlignment(o.align || DA.HorizontalAlignment.RIGHT).setSpacingBefore(0).setSpacingAfter(0);
+    if (text) styleText(p, o.size || 8, o.bold, o.color);
+  }
+  /** جدول راست‌به‌چپ: ستون‌ها معکوس درج می‌شوند تا ستون اول سمت راست صفحه باشد. */
+  function rtlTable(rows, widths) {
+    var cells = rows.map(function (r) { return r.map(function (v) { return v === null || v === undefined ? '' : String(v); }).reverse(); });
+    var t = body.appendTable(cells);
+    t.setBorderColor(C.BORDER).setBorderWidth(0.5);
+    if (widths) widths.slice().reverse().forEach(function (w, i) { t.setColumnWidth(i, w); });
+    first = false;
+    return { t: t, cells: cells, n: rows[0].length };
+  }
+  function cellAt(tb, r, logicalCol) { return tb.t.getRow(r).getCell(tb.n - 1 - logicalCol); }
+  return {
+    para: para,
+    spacer: function () { para('', 4); },
+    banner: function (title, sub) {
+      var tb = rtlTable([[title], [sub]], [PDF_CONTENT_W_]);
+      cellStyle(cellAt(tb, 0, 0), title, { bg: C.NAVY, color: C.NAVY_TEXT, size: 15, bold: true, align: DA.HorizontalAlignment.CENTER, pad: 8 });
+      cellStyle(cellAt(tb, 1, 0), sub, { bg: C.HEAD, color: C.NAVY, size: 9, align: DA.HorizontalAlignment.CENTER, pad: 4 });
+      para('', 4);
+    },
+    heading: function (text) { para(text, 11.5, true, null, C.NAVY, 10, 4); },
+    note: function (text) { para(text, 7.5, false, null, C.MUTED, 2, 4); },
+    /** جدول کلید/مقدار؛ perRow = تعداد ستون (۲ یا ۴). */
+    kv: function (pairs, perRow) {
+      var per = (perRow || 2) / 2, rows = [];
+      for (var i = 0; i < pairs.length; i += per) {
+        var row = [];
+        for (var j = 0; j < per; j++) { var pr = pairs[i + j] || ['', '']; row.push(pr[0], pr[1]); }
+        rows.push(row);
+      }
+      var w = per === 2 ? [80, 183, 80, 184] : [130, 397];
+      var tb = rtlTable(rows, w);
+      rows.forEach(function (row, r) {
+        row.forEach(function (v, c) {
+          var label = c % 2 === 0;
+          cellStyle(cellAt(tb, r, c), v, { bg: label ? C.LABEL : null, bold: label, color: label ? C.NAVY : '#000000', size: 8.5 });
+        });
+      });
+      para('', 4);
+    },
+    /** کارت‌های جمع مالی: ۴ کارت در هر ردیف (عنوان بالا، مبلغ درشت پایین). */
+    cards: function (items) {
+      var rows = [];
+      for (var i = 0; i < items.length; i += 4) {
+        var chunk = items.slice(i, i + 4);
+        while (chunk.length < 4) chunk.push(['', '']);
+        rows.push(chunk.map(function (x) { return x[0]; }));
+        rows.push(chunk.map(function (x) { return x[1]; }));
+      }
+      var tb = rtlTable(rows, [131, 132, 132, 132]);
+      rows.forEach(function (row, r) {
+        row.forEach(function (v, c) {
+          var isLabel = r % 2 === 0;
+          cellStyle(cellAt(tb, r, c), v, isLabel ? { bg: C.HEAD, color: C.NAVY, size: 8, align: DA.HorizontalAlignment.CENTER }
+            : { size: 12, bold: true, align: DA.HorizontalAlignment.CENTER, pad: 6 });
+        });
+      });
+      para('', 2);
+    },
+    /** جدول داده: سرستون تیره، سطرهای راه‌راه، اعداد وسط‌چین، سطر جمع. */
+    table: function (headers, data, o) {
+      o = o || {};
+      if (!data.length) { para(o.empty || '—', 8.5, false, null, C.MUTED, 2, 4); return; }
+      var rows = [headers].concat(data);
+      if (o.total) rows.push(o.total);
+      var tb = rtlTable(rows, o.widths);
+      var last = rows.length - 1;
+      rows.forEach(function (row, r) {
+        row.forEach(function (v, c) {
+          var head = r === 0, total = o.total && r === last;
+          var num = (o.numeric || []).indexOf(c) >= 0;
+          cellStyle(cellAt(tb, r, c), v, {
+            bg: head ? C.NAVY : total ? C.TOTAL : (r % 2 === 0 ? C.ZEBRA : null),
+            color: head ? C.NAVY_TEXT : '#000000', bold: head || total, size: head ? 8 : (o.fontSize || 8),
+            align: head || num ? DA.HorizontalAlignment.CENTER : DA.HorizontalAlignment.RIGHT
+          });
+        });
+      });
+      para('', 2);
+    },
+    signatures: function (approvers) {
+      var rows = [['تهیه‌کننده (ادمین مالی)', 'تأییدکننده', 'مدیر مالی'], ['', approvers, ''], ['امضا و تاریخ:', 'امضا و تاریخ:', 'امضا و تاریخ:']];
+      var tb = rtlTable(rows, [175, 176, 176]);
+      rows.forEach(function (row, r) {
+        row.forEach(function (v, c) {
+          cellStyle(cellAt(tb, r, c), v, r === 0 ? { bg: C.HEAD, bold: true, color: C.NAVY, align: DA.HorizontalAlignment.CENTER }
+            : { size: 8.5, pad: r === 2 ? 22 : 6, align: DA.HorizontalAlignment.CENTER, color: r === 2 ? C.MUTED : '#000000' });
+        });
+      });
+      para('', 2);
+    },
+    table_raw: rtlTable,
+    cellAt: cellAt,
+    cellStyle: cellStyle
+  };
+}
+
+/** هر مدرک در یک صفحه: سربرگ رنگی، جدول مشخصات، تصویر بزرگ وسط صفحه. */
+function Exp_appendEvidencePages_(body, pages, R) {
   var F = Utils_formatNumberFa_;
-  pages.forEach(function (pg) {
+  var DA = DocumentApp;
+  var color = { FOOD: '#1F3B6E', EMPLOYEE_PAYMENT: '#7A4E0B', PAYOUT: '#1B7F3B' };
+  pages.forEach(function (pg, n) {
     body.appendPageBreak();
-    para('پیوست مدرک — ' + pg.kind_fa + ' (' + F(pg.index) + ' از ' + F(pg.count) + ')', 13, true, true);
-    para('درخواست ' + pg.request_id + '  |  تاریخ سفارش: ' + pg.date_fa + '  |  وضعیت: ' + pg.status, 9, false, true);
-    para('پرداخت‌کننده: ' + pg.payer + '  |  افراد: ' + pg.beneficiaries, 9, false, true);
-    para('مبلغ فاکتور: ' + F(pg.claimed) + ' ریال  |  تأییدشده: ' + F(pg.approved) + ' ریال' +
-      (pg.merchant ? '  |  رستوران/سفارش: ' + pg.merchant : ''), 9, false, true);
-    para('توضیح کارمند: ' + (pg.caption || '—') + '  |  ارسال: ' + pg.uploaded_fa + ' توسط ' + pg.uploaded_by, 9, false, true, '#1F3B6E');
+    var title = 'پیوست ' + F(n + 1) + ' از ' + F(pages.length) + ' — ' + pg.kind_fa + (pg.count > 1 ? ' (' + F(pg.index) + ' از ' + F(pg.count) + ')' : '');
+    var tb = R.table_raw([[title]], [PDF_CONTENT_W_]);
+    R.cellStyle(R.cellAt(tb, 0, 0), title, { bg: color[pg.section] || '#1F3B6E', color: '#FFFFFF', size: 12, bold: true, align: DA.HorizontalAlignment.CENTER, pad: 6 });
+    R.para('', 3);
+    var pairs = [
+      ['شناسه درخواست', pg.request_id], ['تاریخ سفارش', pg.date_fa],
+      ['پرداخت‌کننده (دریافت وجه)', pg.payer], ['وضعیت', pg.status],
+      ['افراد', pg.beneficiaries], ['خرید / پرداخت', [pg.channel, pg.payment].filter(Boolean).join(' / ')],
+      ['مبلغ فاکتور (ریال)', F(pg.claimed)], ['مبلغ تأییدشده (ریال)', F(pg.approved)]
+    ];
+    if (pg.section === 'PAYOUT') {
+      pairs.push(['مبلغ واریزشده (ریال)', F(pg.paid_amount)], ['زمان واریز', pg.paid_at_fa || '—'], ['شماره پیگیری', pg.paid_ref || '—'], ['', '']);
+    }
+    if (pg.merchant) pairs.push(['رستوران / شماره سفارش', pg.merchant], ['', '']);
+    R.kv(pairs, 4);
+    R.kv([['توضیح ارسال‌کننده', pg.caption || '—'], ['ارسال', pg.uploaded_fa + ' — ' + pg.uploaded_by]], 2);
     var blob = pg.isImage ? Exp_evidenceBlob_(pg) : null;
     var placed = false;
     if (blob) {
@@ -308,17 +423,18 @@ function Exp_appendEvidencePages_(body, pages, para) {
           var r = Math.min(PDF_IMAGE_MAX_.W / w, PDF_IMAGE_MAX_.H / h, PDF_IMAGE_MAX_.UPSCALE);
           img.setWidth(Math.round(w * r)).setHeight(Math.round(h * r));
         }
-        img.getParent().asParagraph().setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+        img.getParent().asParagraph().setAlignment(DA.HorizontalAlignment.CENTER).setSpacingBefore(6);
         placed = true;
       } catch (e) {
         console.warn('evidence image failed ' + pg.document_id + ': ' + Utils_redact_(e.message));
       }
     }
     if (!placed) {
-      para(pg.isImage ? '⚠️ تصویر قابل درج نبود (فرمت پشتیبانی‌نشده یا فایل در دسترس نیست). نسخه اصلی در پوشه خصوصی Drive است.'
-        : '📄 این مدرک فایل PDF است و به‌صورت تصویر درج نمی‌شود؛ نسخه اصلی در پوشه خصوصی Drive درخواست موجود است.', 10, true, true, '#A33');
+      R.para(pg.isImage ? '⚠️ تصویر قابل درج نبود (فرمت پشتیبانی‌نشده یا فایل در دسترس نیست). نسخه اصلی در پوشه خصوصی Drive است.'
+        : '📄 این مدرک فایل PDF است و به‌صورت تصویر درج نمی‌شود؛ نسخه اصلی در پوشه خصوصی Drive درخواست موجود است.',
+        10, true, DA.HorizontalAlignment.CENTER, '#A33', 30, 4);
     }
-    para('اصالت تصویر توسط سیستم تأیید نشده است (authenticity_not_verified).', 7, false, true, '#666666');
+    R.para('اصالت تصویر توسط سیستم تأیید نشده است (authenticity_not_verified).', 7, false, DA.HorizontalAlignment.CENTER, '#666666', 4, 0);
   });
 }
 
