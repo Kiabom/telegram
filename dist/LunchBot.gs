@@ -1666,7 +1666,8 @@ var MENU_ = {
   HELP: 'ℹ️ راهنما',
   PENDING: '🗂 درخواست‌های در انتظار',
   UNPAID: '💵 پرداخت‌نشده‌ها',
-  REPORT: '📊 گزارش امروز'
+  REPORT: '📊 گزارش امروز',
+  RANGE: '📅 گزارش روز/بازه دلخواه'
 };
 
 /** کیبورد اصلی (Reply Keyboard) متناسب با نقش. */
@@ -1677,7 +1678,7 @@ function Kb_mainMenu_(auth) {
     rows.push([MENU_.MY, MENU_.BALANCE]);
   }
   if (Auth_can_(auth, 'REVIEW')) rows.push([MENU_.PENDING, MENU_.UNPAID]);
-  if (Auth_can_(auth, 'REPORT')) rows.push([MENU_.REPORT]);
+  if (Auth_can_(auth, 'REPORT')) rows.push([MENU_.REPORT, MENU_.RANGE]);
   rows.push([MENU_.HELP]);
   return {
     keyboard: rows.map(function (r) { return r.map(function (t) { return { text: t }; }); }),
@@ -4457,7 +4458,13 @@ function Rep_command_(ctx, kind, args) {
   if (!from || !to || from > to) {
     return Ui_send_(ctx, '⚠️ تاریخ نامعتبر است. نمونه‌ها:\n/dailyreport 1405/08/09\n/monthlyreport 1405/08\n/export 1405/08/01 1405/08/15');
   }
+  Rep_run_(ctx, from, to, type);
+}
+
+/** ساخت و ارسال گزارش برای یک بازه (روزانه، ماهانه یا دلخواه) پس از آزاد شدن قفل. */
+function Rep_run_(ctx, from, to, type) {
   if (Utils_isoDiffDays_(from, to) > 92) return Ui_send_(ctx, '⚠️ حداکثر بازه گزارش ۹۲ روز است.');
+  if (from === to) type = 'DAILY';
   var includeAudit = Auth_can_(ctx.auth, 'AUDIT_REPORT');
   Ui_send_(ctx, '⏳ در حال تهیه گزارش Excel و PDF… (ممکن است تا یک دقیقه طول بکشد)');
   var chatId = ctx.chatId, actor = ctx.tgId;
@@ -4465,7 +4472,7 @@ function Rep_command_(ctx, kind, args) {
     try {
       var model = Rep_build_(from, to, {
         includeAudit: includeAudit, type: type, generatedBy: actor,
-        includeEvidence: includeAudit && (type === 'DAILY' || from === to) && Settings_bool_('REPORT_PDF_EVIDENCE')
+        includeEvidence: includeAudit && Utils_isoDiffDays_(from, to) <= 31 && Settings_bool_('REPORT_PDF_EVIDENCE')
       });
       var files = Rep_generate_(model);
       Rep_sendTo_(chatId, model, files);
@@ -4567,6 +4574,70 @@ function Rep_evidencePages_(reqs, bensBy, docsBy) {
   });
   if (pages.length > max) pages = pages.slice(0, max);
   return pages;
+}
+
+/** منوی گزارش روز/بازه دلخواه با دکمه‌های آماده و ورود تاریخ. */
+function Rep_menu_(ctx) {
+  if (!Adm_require_(ctx, 'REPORT')) return;
+  Ui_send_(ctx, '📅 <b>گزارش کدام روز یا بازه را می‌خواهید؟</b>\nگزارش شامل Excel و PDF است؛ برای ادمین مالی، PDF پیوست تصاویر رسیدها را هم دارد (بازه حداکثر ۳۱ روز).',
+    Kb_inline_([
+      [Btn_('امروز', 'rp|t'), Btn_('دیروز', 'rp|y')],
+      [Btn_('۷ روز اخیر', 'rp|w'), Btn_('این ماه', 'rp|m'), Btn_('ماه قبل', 'rp|pm')],
+      [Btn_('📆 یک روز دلخواه', 'rp|d')],
+      [Btn_('🗓 از تاریخ … تا تاریخ …', 'rp|r')]
+    ]));
+}
+
+function Rep_onMenuCallback_(ctx, act) {
+  if (!Adm_require_(ctx, 'REPORT')) return;
+  var today = Utils_todayIso_();
+  var j = Jal_fromIso_(today);
+  var ex = Utils_faDigits_(Jal_isoToJalali_(Utils_isoAddDays_(today, -3)));
+  switch (act) {
+    case 't': Ui_reply_(ctx, '📊 گزارش امروز'); return Rep_run_(ctx, today, today, 'DAILY');
+    case 'y': var y = Utils_isoAddDays_(today, -1); Ui_reply_(ctx, '📊 گزارش دیروز'); return Rep_run_(ctx, y, y, 'DAILY');
+    case 'w': Ui_reply_(ctx, '📊 گزارش ۷ روز اخیر'); return Rep_run_(ctx, Utils_isoAddDays_(today, -6), today, 'RANGE');
+    case 'm': Ui_reply_(ctx, '📊 گزارش این ماه'); return Rep_run_(ctx, Jal_toIso_(j.jy, j.jm, 1), today, 'MONTHLY');
+    case 'pm':
+      var py = j.jm === 1 ? j.jy - 1 : j.jy, pmo = j.jm === 1 ? 12 : j.jm - 1;
+      var rg = Jal_monthRangeIso_(py, pmo);
+      Ui_reply_(ctx, '📊 گزارش ماه قبل');
+      return Rep_run_(ctx, rg.from, rg.to, 'MONTHLY');
+    case 'd':
+      ctx.sess.data_json.pi = { k: 'RANGE_DAY' };
+      return Ui_reply_(ctx, '📆 تاریخ روز موردنظر را به شمسی بنویسید؛ مثلاً ' + ex + '\nبرای انصراف: /cancel');
+    case 'r':
+      ctx.sess.data_json.pi = { k: 'RANGE_FROM' };
+      return Ui_reply_(ctx, '🗓 تاریخ <b>شروع</b> را به شمسی بنویسید؛ مثلاً ' + ex +
+        '\n(یا هر دو تاریخ را یک‌جا: «۱۴۰۵/۰۸/۰۱ تا ۱۴۰۵/۰۸/۱۵»)\nبرای انصراف: /cancel');
+  }
+  Ui_toast_(ctx, '');
+}
+
+/** دریافت تاریخ‌های گزارش دلخواه از کاربر. */
+function Rep_onRangeText_(ctx, text) {
+  var pi = ctx.sess.data_json.pi;
+  if (!Auth_can_(ctx.auth, 'REPORT')) { delete ctx.sess.data_json.pi; return Ui_send_(ctx, '⛔️ دسترسی ندارید.'); }
+  var today = Utils_todayIso_();
+  var parts = Utils_normalizeDigits_(text).split(/\s*(?:تا|الی|to|-{2,}|–|—)\s*|\s+/).filter(Boolean);
+  var dates = parts.map(function (p) { return Jal_parseUserDate_(p, today); });
+  if (!dates.length || dates.some(function (d) { return !d; })) {
+    return Ui_send_(ctx, '⚠️ تاریخ قابل تشخیص نیست. نمونه درست: ' + Utils_faDigits_(Jal_isoToJalali_(today)) + ' (برای انصراف /cancel)');
+  }
+  if (dates.some(function (d) { return d > today; })) return Ui_send_(ctx, '⚠️ تاریخ نمی‌تواند در آینده باشد.');
+  if (pi.k === 'RANGE_DAY') {
+    delete ctx.sess.data_json.pi;
+    return Rep_run_(ctx, dates[0], dates[0], 'DAILY');
+  }
+  if (pi.k === 'RANGE_FROM' && dates.length < 2) {
+    ctx.sess.data_json.pi = { k: 'RANGE_TO', from: dates[0] };
+    return Ui_send_(ctx, '✅ از ' + Jal_formatLong_(dates[0]) + '\nحالا تاریخ <b>پایان</b> را بنویسید (برای همان یک روز، همان تاریخ را بنویسید):');
+  }
+  var from = pi.k === 'RANGE_TO' ? pi.from : dates[0];
+  var to = pi.k === 'RANGE_TO' ? dates[0] : dates[1];
+  if (from > to) { var x = from; from = to; to = x; }
+  delete ctx.sess.data_json.pi;
+  Rep_run_(ctx, from, to, 'RANGE');
 }
 
 // ===========================================================================
@@ -5426,6 +5497,7 @@ function Router_menuCommand_(text) {
   map[MENU_.MY] = 'myrequests';
   map[MENU_.BALANCE] = 'balance';
   map[MENU_.HELP] = 'help';
+  map[MENU_.RANGE] = 'reportmenu';
   map[MENU_.PENDING] = 'pending';
   map[MENU_.UNPAID] = 'unpaid';
   map[MENU_.REPORT] = 'dailyreport';
@@ -5449,6 +5521,7 @@ function Router_dispatch_(ctx) {
     if (!ownerAdminCmd) return Join_handle_(ctx);
   }
   if (cmd) return Router_command_(ctx, cmd.name, cmd.args);
+  if (s.data_json.pi && /^RANGE_/.test(s.data_json.pi.k) && ctx.text) return Rep_onRangeText_(ctx, ctx.text);
   if (s.data_json.pi && ctx.text) return Adm_onPendingText_(ctx, ctx.text);
   var paidInfo = s.data_json.pi && (s.data_json.pi.k === 'PAID_PHOTO' || s.data_json.pi.k === 'PAID_REF') ? Doc_fileInfo_(ctx.msg) : null;
   if (paidInfo) return Adm_onPaidReceipt_(ctx, paidInfo);
@@ -5485,6 +5558,7 @@ function Router_command_(ctx, name, args) {
     case 'monthlyreport': return Rep_command_(ctx, 'monthly', args);
     case 'export': return Rep_command_(ctx, 'export', args);
     case 'reports': return Rep_listArchive_(ctx);
+    case 'reportmenu': return Rep_menu_(ctx);
     case 'employees': return Adm_employees_(ctx, 0);
     case 'settings': return Adm_settings_(ctx);
     case 'set': return Adm_set_(ctx, args);
@@ -5521,6 +5595,7 @@ function Router_callback_(ctx) {
     case 'jr': return Join_onCallback_(ctx, parts[1], parts[2], parts[3]);
     case 'em': return Adm_onEmployeeCallback_(ctx, parts[1], parts[2], parts[3]);
     case 'my': return Menu_onCallback_(ctx, parts[1], parts[2]);
+    case 'rp': return Rep_onMenuCallback_(ctx, parts[1]);
   }
   Ui_toast_(ctx, 'این دکمه دیگر معتبر نیست.', true);
 }
