@@ -196,7 +196,8 @@ var DOC_KIND = {
   BANK_PAYMENT: 'BANK_PAYMENT',
   CREDIT_PAYMENT: 'CREDIT_PAYMENT',
   MIXED_PAYMENT: 'MIXED_PAYMENT',
-  VOICE_NOTE: 'VOICE_NOTE'
+  VOICE_NOTE: 'VOICE_NOTE',
+  PAYOUT_RECEIPT: 'PAYOUT_RECEIPT'
 };
 
 var DOC_KIND_FA = {
@@ -204,7 +205,8 @@ var DOC_KIND_FA = {
   BANK_PAYMENT: 'رسید پرداخت بانکی/درگاه',
   CREDIT_PAYMENT: 'اثبات تراکنش اعتباری',
   MIXED_PAYMENT: 'مدرک پرداخت ترکیبی',
-  VOICE_NOTE: 'پیام صوتی'
+  VOICE_NOTE: 'پیام صوتی',
+  PAYOUT_RECEIPT: 'رسید واریز به کارمند (توسط ادمین)'
 };
 
 var SPLIT = { SINGLE: 'SINGLE', EQUAL: 'EQUAL', INDIVIDUAL: 'INDIVIDUAL' };

@@ -355,3 +355,27 @@ test('AI: ویس فارسی → نمایش متن، تأیید کاربر، سپ
   assert.equal(bot.lastRequest().claimed_total_rial, 0, 'متن ویس دستور تلقی نمی‌شود');
   assert.match(bot.last(U.ali), /مبلغ نهایی فاکتور را بنویسید/);
 });
+
+test('ثبت پرداخت با عکس رسید بانکی: رسید ذخیره و همراه پیام برای دریافت‌کننده ارسال می‌شود', () => {
+  const bot = createStandardBot();
+  const rid = submitRequest(bot, { user: U.reza, people: 'خودم', total: '2000000 ریال', payer: 'علی احمدی' });
+  approve(bot, rid);
+  bot.send(U.admin, '/unpaid');
+  bot.click(U.admin, rid);
+  bot.click(U.admin, 'ثبت پرداخت‌شده');
+  bot.click(U.admin, 'ثبت با عکس رسید بانکی');
+  assert.match(bot.last(U.admin), /رسید بانکی واریز به علی احمدی/);
+  bot.photo(U.admin, { fileId: 'PAYOUT1', caption: '۹۸۷۶۵۴' });
+  const r = bot.request(rid);
+  assert.equal(r.status, 'PAID');
+  assert.equal(bot.rows('Payments')[0].transaction_reference_optional, '987654');
+  const doc = bot.rows('Documents').find((d) => d.document_kind === 'PAYOUT_RECEIPT');
+  assert.ok(doc && doc.drive_file_id);
+  for (const u of [U.ali, U.reza]) {
+    const photo = bot.chat(u).find((m) => m.media === 'PAYOUT1');
+    assert.ok(photo, 'عکس رسید برای ' + u.first_name);
+    assert.match(photo.text, /رسید بانکی واریز[\s\S]*۲٬۰۰۰٬۰۰۰ ریال[\s\S]*987654/);
+  }
+  assert.ok(bot.chat(U.ali).some((m) => /پرداخت شد/.test(m.text)));
+  assert.equal(bot.rows('Payments').length, 1);
+});

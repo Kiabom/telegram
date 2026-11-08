@@ -189,6 +189,8 @@ function Router_dispatch_(ctx) {
   }
   if (cmd) return Router_command_(ctx, cmd.name, cmd.args);
   if (s.data_json.pi && ctx.text) return Adm_onPendingText_(ctx, ctx.text);
+  var paidInfo = s.data_json.pi && (s.data_json.pi.k === 'PAID_PHOTO' || s.data_json.pi.k === 'PAID_REF') ? Doc_fileInfo_(ctx.msg) : null;
+  if (paidInfo) return Adm_onPaidReceipt_(ctx, paidInfo);
 
   var inWizard = !!(s.data_json.d && /^W_/.test(s.step));
   var info = Doc_fileInfo_(ctx.msg);

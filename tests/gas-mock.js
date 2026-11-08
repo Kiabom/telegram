@@ -361,7 +361,7 @@ function createEnv(opts = {}) {
     const item = { type: 'p', text };
     doc.content.push(item);
     const p = chainProxy({
-      setText: (t) => { item.text = t; return p; },
+      setText: (t) => { item.text = t; return undefined; }, // مثل Docs واقعی: void
       getText: () => item.text,
       editAsText: () => chainProxy({}),
       asParagraph: () => p

@@ -204,7 +204,8 @@ var DOC_KIND = {
   BANK_PAYMENT: 'BANK_PAYMENT',
   CREDIT_PAYMENT: 'CREDIT_PAYMENT',
   MIXED_PAYMENT: 'MIXED_PAYMENT',
-  VOICE_NOTE: 'VOICE_NOTE'
+  VOICE_NOTE: 'VOICE_NOTE',
+  PAYOUT_RECEIPT: 'PAYOUT_RECEIPT'
 };
 
 var DOC_KIND_FA = {
@@ -212,7 +213,8 @@ var DOC_KIND_FA = {
   BANK_PAYMENT: 'رسید پرداخت بانکی/درگاه',
   CREDIT_PAYMENT: 'اثبات تراکنش اعتباری',
   MIXED_PAYMENT: 'مدرک پرداخت ترکیبی',
-  VOICE_NOTE: 'پیام صوتی'
+  VOICE_NOTE: 'پیام صوتی',
+  PAYOUT_RECEIPT: 'رسید واریز به کارمند (توسط ادمین)'
 };
 
 var SPLIT = { SINGLE: 'SINGLE', EQUAL: 'EQUAL', INDIVIDUAL: 'INDIVIDUAL' };
@@ -3649,7 +3651,12 @@ function Adm_onCallback_(ctx, act, rid, arg) {
       if (req.status !== STATUS.APPROVED) return Adm_staleAction_(ctx, req);
       s.data_json.pi = { k: 'PAID_REF', rid: rid };
       return Ui_send_(ctx, '💵 شماره پیگیری/مرجع واریز به ' + Utils_escapeHtml_(Emp_name_(req.payer_employee_id)) + ' (' +
-        Utils_formatRial_(req.approved_reimbursement_rial) + ') را بفرستید، یا:', Kb_inline_([[Btn_('ثبت بدون شماره پیگیری', 'ad|pn|' + rid)]]));
+        Utils_formatRial_(req.approved_reimbursement_rial) + ') را بفرستید، یا:', Kb_inline_([[Btn_('📎 ثبت با عکس رسید بانکی', 'ad|pp|' + rid)], [Btn_('ثبت بدون شماره پیگیری', 'ad|pn|' + rid)]]));
+    case 'pp':
+      if (req.status !== STATUS.APPROVED) return Adm_staleAction_(ctx, req);
+      s.data_json.pi = { k: 'PAID_PHOTO', rid: rid };
+      return Ui_reply_(ctx, '📎 عکس یا PDF رسید بانکی واریز به ' + Utils_escapeHtml_(Emp_name_(req.payer_employee_id)) + ' (' +
+        Utils_formatRial_(req.approved_reimbursement_rial) + ') را بفرستید.\nشماره پیگیری را (اختیاری) در کپشن همان عکس بنویسید. برای انصراف: /cancel');
     case 'pn':
       delete s.data_json.pi;
       return Adm_doPaid_(ctx, rid, '');
@@ -3717,7 +3724,7 @@ function Adm_doCorrection_(ctx, rid, reason) {
     '\nلطفاً موارد را اصلاح و دوباره ارسال کنید.', Kb_inline_([[Btn_('✏️ اصلاح درخواست', 'my|f|' + rid)]]));
 }
 
-function Adm_doPaid_(ctx, rid, ref) {
+function Adm_doPaid_(ctx, rid, ref, receipt) {
   var r = Req_markPaid_(rid, ref, ctx.auth);
   if (!r.ok) {
     if (r.code === 'ALREADY') { Ui_toast_(ctx, 'قبلاً پرداخت‌شده ثبت شده است.', true); return Adm_openCard_(ctx, rid); }
@@ -3727,6 +3734,34 @@ function Adm_doPaid_(ctx, rid, ref) {
   Adm_openCard_(ctx, rid, '💵 پرداخت ثبت شد.');
   Adm_notifyParties_(r.req, '💵 مبلغ <b>' + Utils_formatRial_(r.payment.amount_rial) + '</b> بابت درخواست <code>' + rid + '</code> به ' +
     Utils_escapeHtml_(Emp_name_(r.req.payer_employee_id)) + ' پرداخت شد.' + (ref ? '\nشماره پیگیری: ' + Utils_escapeHtml_(ref) : ''), null, true);
+  if (receipt) Adm_sendReceiptToParties_(r.req, receipt, r.payment.amount_rial, ref);
+}
+
+/** عکس رسید واریز برای پرداخت‌کننده (و ثبت‌کننده اگر فرق دارد) فرستاده می‌شود. */
+function Adm_sendReceiptToParties_(req, receipt, amount, ref) {
+  var caption = '🧾 رسید بانکی واریز <b>' + Utils_formatRial_(amount) + '</b> بابت درخواست <code>' + req.request_id + '</code>' +
+    (ref ? '\nشماره پیگیری: ' + Utils_escapeHtml_(ref) : '');
+  var targets = [String(req.submitter_telegram_id)];
+  var payer = Emp_byId_(req.payer_employee_id);
+  if (payer && payer.telegram_user_id) targets.push(String(payer.telegram_user_id));
+  Utils_unique_(targets).forEach(function (chatId) {
+    try { Tg_sendExisting_(chatId, receipt.media === 'photo' ? 'photo' : 'document', receipt.file_id, caption); }
+    catch (e) { console.warn('receipt send failed to ' + chatId + ': ' + Utils_redact_(e.message)); }
+  });
+}
+
+/** ادمین در حالت ثبت پرداخت، عکس/PDF رسید واریز فرستاده است. */
+function Adm_onPaidReceipt_(ctx, info) {
+  var pi = ctx.sess.data_json.pi;
+  if (!Auth_can_(ctx.auth, 'REVIEW')) { delete ctx.sess.data_json.pi; return Ui_send_(ctx, '⛔️ دسترسی ندارید.'); }
+  if (info.unsupported || info.media === 'voice') return Ui_send_(ctx, '⚠️ لطفاً عکس یا PDF رسید را بفرستید (یا /cancel).');
+  var req = Req_get_(pi.rid);
+  if (!req || req.status !== STATUS.APPROVED) { delete ctx.sess.data_json.pi; return Adm_staleAction_(ctx, req || { request_id: pi.rid, status: '' }); }
+  var saved = Doc_save_(ctx, req, DOC_KIND.PAYOUT_RECEIPT, info, ctx.prefetched);
+  if (!saved.ok && saved.error !== 'ALREADY_IN_REQUEST') return Ui_send_(ctx, '⚠️ ' + Doc_errorFa_(saved.error));
+  delete ctx.sess.data_json.pi;
+  var ref = Utils_normalizeDigits_(Utils_truncate_(String((ctx.msg && ctx.msg.caption) || '').trim(), 100));
+  Adm_doPaid_(ctx, pi.rid, ref, info);
 }
 
 /** ورودی متنی ادمین وقتی منتظر دلیل/مبلغ/شماره پیگیری است. */
@@ -4740,7 +4775,8 @@ function Exp_buildPdfDoc_(m, folder, base) {
     .setMarginTop(PDF_PAGE_.MARGIN).setMarginBottom(PDF_PAGE_.MARGIN).setMarginLeft(PDF_PAGE_.MARGIN).setMarginRight(PDF_PAGE_.MARGIN);
   var first = true;
   function para(text, size, bold, center, color) {
-    var p = first ? body.getParagraphs()[0].setText(text) : body.appendParagraph(text);
+    var p;
+    if (first) { p = body.getParagraphs()[0]; p.setText(text); } else p = body.appendParagraph(text);
     first = false;
     p.setLeftToRight(false).setAlignment(center ? DocumentApp.HorizontalAlignment.CENTER : DocumentApp.HorizontalAlignment.RIGHT);
     var t = p.editAsText();
@@ -5284,6 +5320,8 @@ function Router_dispatch_(ctx) {
   }
   if (cmd) return Router_command_(ctx, cmd.name, cmd.args);
   if (s.data_json.pi && ctx.text) return Adm_onPendingText_(ctx, ctx.text);
+  var paidInfo = s.data_json.pi && (s.data_json.pi.k === 'PAID_PHOTO' || s.data_json.pi.k === 'PAID_REF') ? Doc_fileInfo_(ctx.msg) : null;
+  if (paidInfo) return Adm_onPaidReceipt_(ctx, paidInfo);
 
   var inWizard = !!(s.data_json.d && /^W_/.test(s.step));
   var info = Doc_fileInfo_(ctx.msg);

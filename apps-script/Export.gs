@@ -215,7 +215,8 @@ function Exp_buildPdfDoc_(m, folder, base) {
     .setMarginTop(PDF_PAGE_.MARGIN).setMarginBottom(PDF_PAGE_.MARGIN).setMarginLeft(PDF_PAGE_.MARGIN).setMarginRight(PDF_PAGE_.MARGIN);
   var first = true;
   function para(text, size, bold, center, color) {
-    var p = first ? body.getParagraphs()[0].setText(text) : body.appendParagraph(text);
+    var p;
+    if (first) { p = body.getParagraphs()[0]; p.setText(text); } else p = body.appendParagraph(text);
     first = false;
     p.setLeftToRight(false).setAlignment(center ? DocumentApp.HorizontalAlignment.CENTER : DocumentApp.HorizontalAlignment.RIGHT);
     var t = p.editAsText();
