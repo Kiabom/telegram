@@ -76,8 +76,9 @@ test('فرمان /dailyreport: فایل XLSX و PDF واقعی ساخته، با
   assert.equal(typeof orders[1][1], 'string', 'تاریخ به‌صورت Date سریال‌شده در JSON');
   assert.match(orders[1][1], /^2026-10-31T/);
   const pdf = bot.env.exports.find((e) => e.fmt === 'pdf');
-  assert.match(pdf.url, /gid=\d+.*portrait=false.*fitw=true/);
-  const pdfSheet = pdf.sheets.find((s) => s.name === 'PDF').data.map((r) => (r || []).join(' ')).join('\n');
+  assert.equal(pdf.kind, 'document');
+  assert.equal(pdf.closed, true);
+  const pdfSheet = pdf.content.map((c) => c.text || (c.cells ? c.cells.map((r) => r.join(' ')).join('\n') : '')).join('\n');
   assert.match(pdfSheet, /فهرست دریافت‌کنندگان وجه/);
   assert.match(pdfSheet, /۱۲٬۵۰۰٬۰۰۰/);
   assert.match(pdfSheet, /authenticity_not_verified/);
@@ -86,10 +87,73 @@ test('فرمان /dailyreport: فایل XLSX و PDF واقعی ساخته، با
   assert.equal(archive.length, 1);
   assert.equal(archive[0].totals_json.summary.approved, 13500000);
   const tmp = [...bot.env.drive.files.values()].filter((f) => f.mime === 'application/vnd.google-apps.spreadsheet');
-  assert.ok(tmp.every((f) => f.trashed), 'شیت موقت حذف می‌شود');
+  assert.ok(tmp.length >= 2 && tmp.every((f) => f.trashed), 'شیت و سند موقت حذف می‌شوند');
   const saved = [...bot.env.drive.files.values()].filter((f) => /LunchReport_/.test(f.name) && !f.trashed).map((f) => f.name.split('.').pop()).sort();
   assert.deepEqual(saved, ['json', 'pdf', 'xlsx']);
   assert.deepEqual(bot.env.publicShares, []);
+});
+
+test('PDF روزانه ادمین: هر فاکتور غذا و رسید پرداخت در یک صفحه جدا، بزرگ، با توضیح کارمند', () => {
+  const bot = createStandardBot();
+  const rid = submitRequest(bot, { user: U.ali, people: 'خودم و محمد', total: '4000000 ریال', split: 'equal', purchasePhotos: 2, paymentPhotos: 1 });
+  submitRequest(bot, { user: U.reza, total: '1000000 ریال' });
+  bot.send(U.admin, '/dailyreport');
+  const pdf = bot.env.exports.filter((e) => e.kind === 'document').pop();
+  const c = pdf.content;
+  const images = c.filter((x) => x.type === 'image');
+  assert.equal(images.length, 5, '۳ عکس علی + ۲ عکس رضا');
+  // هر تصویر بعد از یک شکست صفحه و در صفحه خودش
+  const breaks = c.map((x, i) => (x.type === 'pagebreak' ? i : -1)).filter((i) => i >= 0);
+  assert.equal(breaks.length, 5);
+  breaks.forEach((b, k) => {
+    const end = k + 1 < breaks.length ? breaks[k + 1] : c.length;
+    assert.equal(c.slice(b, end).filter((x) => x.type === 'image').length, 1);
+  });
+  // ترتیب و توضیحات: ابتدا فاکتورهای غذا و سپس رسید پرداخت همان درخواست
+  const headers = c.filter((x) => x.type === 'p' && /^پیوست مدرک/.test(x.text)).map((x) => x.text);
+  assert.match(headers[0], /فاکتور \/ رسید غذا \(۱ از ۲\)/);
+  assert.match(headers[1], /فاکتور \/ رسید غذا \(۲ از ۲\)/);
+  assert.match(headers[2], /رسید پرداخت بانکی/);
+  const text = c.filter((x) => x.type === 'p').map((x) => x.text).join('\n');
+  assert.match(text, new RegExp('درخواست ' + rid));
+  assert.match(text, /توضیح کارمند: فاکتور/);
+  assert.match(text, /افراد: علی احمدی، محمد رضایی/);
+  assert.match(text, /مبلغ فاکتور: ۴٬۰۰۰٬۰۰۰ ریال/);
+  // بزرگ و خوانا: تصویر ۸۰۰×۱۲۰۰ به ارتفاع کامل ناحیه چاپ (۶۰۰pt) رسانده می‌شود
+  assert.deepEqual([images[0].w, images[0].h], [400, 600]);
+  // ناظر گزارش پیوست مدارک دریافت نمی‌کند
+  bot.send(U.viewer, '/dailyreport');
+  const vpdf = bot.env.exports.filter((e) => e.kind === 'document').pop();
+  assert.equal(vpdf.content.filter((x) => x.type === 'image').length, 0);
+});
+
+test('PDF روزانه: مدرک PDF یا تصویر خراب به‌جای قطع گزارش با یادداشت جایگزین می‌شود؛ قابل خاموش شدن', () => {
+  const bot = createStandardBot();
+  bot.send(U.ali, '/new');
+  bot.click(U.ali, 'سفارش آنلاین');
+  bot.click(U.ali, 'بانکی/درگاه');
+  bot.document(U.ali, { mime: 'application/pdf' });
+  bot.click(U.ali, 'ثبت مدرک خرید');
+  bot.photo(U.ali);
+  bot.click(U.ali, 'ثبت مدرک پرداخت');
+  bot.click(U.ali, 'امروز');
+  bot.send(U.ali, 'خودم');
+  bot.click(U.ali, 'تأیید همین افراد');
+  bot.click(U.ali, 'خودم');
+  bot.send(U.ali, '2000000 ریال');
+  bot.click(U.ali, 'رد شدن');
+  bot.click(U.ali, 'تأیید و ثبت');
+  bot.env.imageFail = true;
+  bot.send(U.admin, '/dailyreport');
+  let c = bot.env.exports.filter((e) => e.kind === 'document').pop().content.map((x) => x.text || '').join('\n');
+  assert.match(c, /فایل PDF است/);
+  assert.match(c, /تصویر قابل درج نبود/);
+  assert.equal(bot.tg.documents.filter((d) => /\.pdf$/.test(d.name)).length, 1);
+  bot.env.imageFail = false;
+  bot.setSetting('REPORT_PDF_EVIDENCE', 'FALSE');
+  bot.send(U.admin, '/dailyreport');
+  c = bot.env.exports.filter((e) => e.kind === 'document').pop().content;
+  assert.equal(c.filter((x) => x.type === 'pagebreak').length, 0);
 });
 
 test('/reports: فهرست گزارش‌های بایگانی‌شده فقط برای ادمین', () => {

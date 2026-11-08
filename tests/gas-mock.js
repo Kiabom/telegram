@@ -313,6 +313,13 @@ function createEnv(opts = {}) {
         const r = tg.handle(method, payload);
         return response(r.code, r.body);
       }
+      if (url.startsWith('https://docs.google.com/document/d/')) {
+        const id = url.split('/')[5];
+        const doc = env.documents.get(id);
+        env.exports.push({ id, fmt: 'pdf', url, kind: 'document', content: doc ? JSON.parse(JSON.stringify(doc.content)) : [], closed: doc && doc.closed });
+        if (env.exportFail) return response(env.exportFail, 'error');
+        return response(200, '', new Blob(Buffer.from('%PDF-1.4 fake-doc'), 'application/pdf', 'export.pdf'));
+      }
       if (url.startsWith('https://docs.google.com/spreadsheets/d/')) {
         const id = url.split('/')[5];
         const fmt = (url.match(/format=(\w+)/) || [])[1];
@@ -346,6 +353,53 @@ function createEnv(opts = {}) {
     flush: () => {},
     newDataValidation: () => chainProxy({ build: () => ({}) }),
     BorderStyle: { SOLID: 'SOLID' }
+  };
+
+  // DocumentApp: محتوای سند (پاراگراف، جدول، تصویر، شکست صفحه) ثبت می‌شود تا تست‌ها بررسی کنند.
+  env.documents = new Map();
+  const makeParagraph = (doc, text) => {
+    const item = { type: 'p', text };
+    doc.content.push(item);
+    const p = chainProxy({
+      setText: (t) => { item.text = t; return p; },
+      getText: () => item.text,
+      editAsText: () => chainProxy({}),
+      asParagraph: () => p
+    });
+    return p;
+  };
+  const DocumentApp = {
+    HorizontalAlignment: { LEFT: 'LEFT', CENTER: 'CENTER', RIGHT: 'RIGHT' },
+    create: (name) => {
+      const id = 'doc' + (SS_SEQ++) + '_' + crypto.randomBytes(3).toString('hex');
+      const doc = { id, name, content: [], closed: false };
+      env.documents.set(id, doc);
+      env.spreadsheets.set(id, { name, sheets: [] });
+      let firstPara = null;
+      const body = chainProxy({
+        getParagraphs: () => { if (!firstPara) firstPara = makeParagraph(doc, ''); return [firstPara]; },
+        appendParagraph: (t) => makeParagraph(doc, t),
+        appendPageBreak: () => { doc.content.push({ type: 'pagebreak' }); return chainProxy({}); },
+        appendTable: (cells) => {
+          doc.content.push({ type: 'table', cells: JSON.parse(JSON.stringify(cells)) });
+          const cell = chainProxy({ getChild: () => chainProxy({ asParagraph: () => chainProxy({ editAsText: () => chainProxy({}) }) }) });
+          return chainProxy({ getRow: () => chainProxy({ getCell: () => cell }) });
+        },
+        appendImage: (blob) => {
+          if (env.imageFail) throw new Error('Invalid image data');
+          const item = { type: 'image', bytes: blob.getDataAsString(), w: 800, h: 1200 };
+          doc.content.push(item);
+          const para = chainProxy({});
+          const img = chainProxy({
+            getWidth: () => item.w, getHeight: () => item.h,
+            setWidth: (w) => { item.w = w; return img; }, setHeight: (h) => { item.h = h; return img; },
+            getParent: () => chainProxy({ asParagraph: () => para })
+          });
+          return img;
+        }
+      });
+      return chainProxy({ getId: () => id, getBody: () => body, saveAndClose: () => { doc.closed = true; } });
+    }
   };
 
   const triggerBuilder = (name) => {
@@ -391,6 +445,7 @@ function createEnv(opts = {}) {
       })
     },
     SpreadsheetApp,
+    DocumentApp,
     DriveApp: drive.DriveApp,
     UrlFetchApp,
     ScriptApp: {

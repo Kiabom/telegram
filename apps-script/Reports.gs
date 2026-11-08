@@ -121,6 +121,8 @@ function Rep_build_(fromIso, toIso, opts) {
     });
   }
 
+  var evidencePages = opts.includeEvidence ? Rep_evidencePages_(reqs, bensBy, docsBy, ids) : [];
+
   var payoutList = Object.keys(payouts).map(function (k) { return payouts[k]; }).sort(function (a, b) { return b.approved - a.approved; });
   var capList = Object.keys(capUsage).map(function (k) { var c = capUsage[k]; c.remaining = Math.max(0, c.cap - c.used); return c; })
     .sort(function (a, b) { return (a.date + a.name).localeCompare(b.date + b.name, 'fa'); });
@@ -131,7 +133,7 @@ function Rep_build_(fromIso, toIso, opts) {
     generated_at: Utils_nowIso_(), generated_by: opts.generatedBy || '',
     include_audit: !!opts.includeAudit,
     summary: sum, payouts: payoutList, orders: orders, cap_usage: capList, pending_rejected: pendingRejected,
-    evidence: evidence, audit: audit,
+    evidence: evidence, audit: audit, evidence_pages: evidencePages,
     approvers: Object.keys(approvers).map(Adm_actorName_)
   };
 }
@@ -223,7 +225,10 @@ function Rep_command_(ctx, kind, args) {
   var chatId = ctx.chatId, actor = ctx.tgId;
   ctx.defer(function () {
     try {
-      var model = Rep_build_(from, to, { includeAudit: includeAudit, type: type, generatedBy: actor });
+      var model = Rep_build_(from, to, {
+        includeAudit: includeAudit, type: type, generatedBy: actor,
+        includeEvidence: includeAudit && type === 'DAILY' && Settings_bool_('REPORT_PDF_EVIDENCE')
+      });
       var files = Rep_generate_(model);
       Rep_sendTo_(chatId, model, files);
     } catch (e) {
@@ -252,7 +257,9 @@ function Rep_scheduledDaily_() {
   recipients.forEach(function (r) {
     var key = r.audit ? 'audit' : 'plain';
     if (!cache[key]) {
-      var model = Rep_build_(today, today, { includeAudit: r.audit, type: 'DAILY', generatedBy: 'SCHEDULER' });
+      var model = Rep_build_(today, today, {
+        includeAudit: r.audit, type: 'DAILY', generatedBy: 'SCHEDULER', includeEvidence: r.audit && Settings_bool_('REPORT_PDF_EVIDENCE')
+      });
       cache[key] = { model: model, files: model.summary.orders || model.summary.counts.INCOMPLETE ? Rep_generate_(model) : null };
     }
     var c = cache[key];
@@ -275,4 +282,38 @@ function Rep_listArchive_(ctx) {
       '\n   <a href="' + Doc_driveLink_(r.xlsx_drive_id) + '">Excel</a> | <a href="' + Doc_driveLink_(r.pdf_drive_id) + '">PDF</a>';
   });
   Ui_send_(ctx, '🗄 <b>آخرین گزارش‌های بایگانی‌شده</b> (لینک‌های خصوصی Drive؛ فقط برای حساب‌های مجاز باز می‌شوند):\n' + lines.join('\n'));
+}
+
+/**
+ * صفحات پیوست مدارک برای PDF روزانه: برای هر درخواست ثبت‌شده (به‌جز لغوشده/پیش‌نویس)،
+ * ابتدا مدارک خرید و سپس مدارک پرداخت، با توضیح (کپشن) کارمند.
+ */
+function Rep_evidencePages_(reqs, bensBy, docsBy) {
+  var max = Settings_int_('REPORT_PDF_MAX_IMAGES') || 150;
+  var pages = [];
+  reqs.forEach(function (r) {
+    if (r.status === STATUS.CANCELLED || DRAFT_STATUSES.indexOf(r.status) >= 0) return;
+    var docs = (docsBy[r.request_id] || []).filter(function (d) { return d.document_kind !== DOC_KIND.VOICE_NOTE; });
+    var ordered = docs.filter(function (d) { return d.document_kind === DOC_KIND.PURCHASE; })
+      .concat(docs.filter(function (d) { return PAYMENT_DOC_KINDS.indexOf(d.document_kind) >= 0; }));
+    var bens = (bensBy[r.request_id] || []).map(function (b) { return b.employee_name_snapshot; }).join('، ');
+    ordered.forEach(function (d) {
+      var sameKind = ordered.filter(function (x) { return (x.document_kind === DOC_KIND.PURCHASE) === (d.document_kind === DOC_KIND.PURCHASE); });
+      pages.push({
+        document_id: d.document_id, request_id: r.request_id,
+        kind_fa: d.document_kind === DOC_KIND.PURCHASE ? 'فاکتور / رسید غذا' : DOC_KIND_FA[d.document_kind],
+        index: sameKind.indexOf(d) + 1, count: sameKind.length,
+        date_fa: Jal_formatLong_(r.order_date_iso), status: STATUS_FA[r.status] || r.status,
+        payer: Emp_name_(r.payer_employee_id), beneficiaries: bens,
+        claimed: r.claimed_total_rial, approved: (r.status === STATUS.APPROVED || r.status === STATUS.PAID) ? r.approved_reimbursement_rial : 0,
+        merchant: [r.merchant, r.merchant_order_id].filter(Boolean).join(' — '),
+        caption: d.caption || '', uploaded_fa: Jal_formatDateTimeFa_(d.uploaded_at),
+        uploaded_by: (Emp_byTelegramId_(d.uploaded_by) || {}).full_name_fa || String(d.uploaded_by || ''),
+        drive_file_id: d.drive_file_id, telegram_file_id: d.telegram_file_id, mime_type: d.mime_type, file_size: d.file_size,
+        isImage: String(d.mime_type || '').indexOf('image/') === 0
+      });
+    });
+  });
+  if (pages.length > max) pages = pages.slice(0, max);
+  return pages;
 }

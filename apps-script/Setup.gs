@@ -206,7 +206,7 @@ function installTriggers() {
 function sendTestReport() {
   App_resetState_();
   var today = Utils_todayIso_();
-  var model = Rep_build_(today, today, { includeAudit: true, type: 'DAILY', generatedBy: 'SETUP_TEST' });
+  var model = Rep_build_(today, today, { includeAudit: true, includeEvidence: true, type: 'DAILY', generatedBy: 'SETUP_TEST' });
   var files = Rep_generate_(model);
   Auth_ownerIds_().forEach(function (id) { Rep_sendTo_(id, model, files); });
   Logger.log('✅ گزارش آزمایشی ساخته و برای مالک ارسال شد. XLSX: ' + files.xlsxId + ' PDF: ' + files.pdfId);
