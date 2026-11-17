@@ -274,6 +274,8 @@ var DEFAULT_SETTINGS = [
   ['REPORT_DAILY_HOUR', '17', 'ساعت تقریبی ارسال گزارش روزانه (۰ تا ۲۳ به وقت تهران). تریگر گوگل ممکن است تا یک ساعت جابه‌جا اجرا شود.'],
   ['REPORT_RECIPIENTS', '', 'شناسه‌های تلگرام گیرندگان گزارش خودکار (با کاما). خالی = همه ادمین‌های مالی و مالک. فقط افراد دارای نقش مجاز دریافت می‌کنند.'],
   ['REPORT_FONT', 'Vazirmatn', 'فونت گزارش PDF/Excel.'],
+  ['SIMPLE_REPORT_PLACE', 'امیرکبیر', 'نام مکان در عنوان «گزارش‌گیری ساده»؛ مثلاً «ناهار امیرکبیر شنبه ۲۵ آبان ۱۴۰۵ — غذای ۴ نفر». خالی = بدون نام مکان.'],
+  ['SIMPLE_REPORT_PAYEE', 'تنخواه', 'گیرنده در خط «واریز … ریال به …» در گزارش‌گیری ساده.'],
   ['REPORT_PDF_EVIDENCE', 'TRUE', 'در PDF گزارش روزانه ادمین، تصویر فاکتور غذا و رسید پرداخت هر درخواست، هر کدام در یک صفحه جدا با توضیح کارمند.'],
   ['REPORT_PDF_MAX_IMAGES', '150', 'حداکثر تعداد تصویر پیوست در PDF روزانه.'],
   ['NOTIFY_ADMINS_ON_SUBMIT', 'TRUE', 'ارسال کارت درخواست جدید برای ادمین‌های مالی.']
@@ -5082,7 +5084,9 @@ function Exp_evidenceBlob_(pg) {
  * فقط ادمین مالی و مالک (تصاویر رسیدها محرمانه‌اند).
  */
 
-var SIMPLE_IMG_ = { CELL_W: 250, MAX_H: 470, SINGLE_W: 470, UPSCALE: 2 };
+/** صفحه A4 بدون حاشیه چپ و راست؛ هر عکس نصف عرض کامل صفحه (۲۹۷pt) تا اعداد رسید در چاپ خوانا باشند. */
+var SIMPLE_PAGE_ = { W: 595.28, H: 841.89, TOP: 18, BOTTOM: 18, TEXT_INDENT: 28 };
+var SIMPLE_IMG_ = { CELL_W: 297, MAX_H: 640, SINGLE_W: 595, UPSCALE: 3 };
 var SIMPLE_STATUSES_ = ['READY_FOR_REVIEW', 'APPROVED', 'PAID'];
 
 function Simple_menu_(ctx) {
@@ -5181,35 +5185,31 @@ function Simple_generateDocx_(m) {
   tmp.moveTo(folder);
   try {
     var body = doc.getBody();
-    body.setPageWidth(595.28).setPageHeight(841.89).setMarginTop(36).setMarginBottom(36).setMarginLeft(36).setMarginRight(36);
+    body.setPageWidth(SIMPLE_PAGE_.W).setPageHeight(SIMPLE_PAGE_.H).setMarginTop(SIMPLE_PAGE_.TOP).setMarginBottom(SIMPLE_PAGE_.BOTTOM).setMarginLeft(0).setMarginRight(0);
     var first = true;
     var CENTER = DocumentApp.HorizontalAlignment.CENTER, RIGHT = DocumentApp.HorizontalAlignment.RIGHT;
     function para(text, size, bold, align) {
       var p;
       if (first) { p = body.getParagraphs()[0]; p.setText(text); first = false; } else p = body.appendParagraph(text);
-      p.setLeftToRight(false).setAlignment(align || RIGHT).setSpacingBefore(0).setSpacingAfter(4);
+      p.setLeftToRight(false).setAlignment(align || RIGHT).setSpacingBefore(0).setSpacingAfter(4)
+        .setIndentStart(SIMPLE_PAGE_.TEXT_INDENT).setIndentEnd(SIMPLE_PAGE_.TEXT_INDENT);
       if (text) p.editAsText().setFontFamily(font).setFontSize(size || 13).setBold(!!bold);
       return p;
     }
     var F = Utils_formatNumberFa_;
     m.orders.forEach(function (o, idx) {
       if (idx > 0) body.appendPageBreak();
-      para('ناهار ' + Jal_formatLong_(o.date) + ' — غذای ' + F(o.people.length) + ' نفر', 16, true, CENTER);
+      para(Simple_title_(o), 16, true, CENTER);
       Simple_appendImages_(body, o.images);
-      para('افراد و سهم هر نفر:', 13, true);
-      o.people.forEach(function (p, i) {
-        para(F(i + 1) + '. ' + p.name + ' — سهم ' + F(p.share) + ' ریال' + (p.share !== p.cost ? ' (هزینه واقعی ' + F(p.cost) + ')' : ''), 13);
-      });
-      para('مبلغ فاکتور: ' + F(o.claimed) + ' ریال', 12);
-      para((o.status === STATUS.PAID ? 'واریز ' : o.approved ? 'قابل واریز ' : 'در انتظار تأیید — مبلغ تخمینی ') +
-        F(o.amount) + ' ریال به ' + o.payer, 15, true);
+      o.people.forEach(function (p) { para(p.name, 14); });
+      para('واریز ' + F(o.amount) + ' ریال به ' + Simple_payee_() + (o.approved ? '' : ' (در انتظار تأیید)'), 15, true);
     });
     body.appendPageBreak();
     para(m.title + ' — جمع کل', 16, true, CENTER);
     m.orders.forEach(function (o, i) {
-      para(F(i + 1) + '. ' + Jal_formatShortFa_(o.date) + ' — ' + o.payer + ' — ' + F(o.people.length) + ' نفر — ' + F(o.amount) + ' ریال', 12);
+      para(F(i + 1) + '. ' + Simple_title_(o) + ' — ' + F(o.amount) + ' ریال', 12);
     });
-    para('جمع کل: ' + F(m.total) + ' ریال', 15, true);
+    para('جمع کل واریز به ' + Simple_payee_() + ': ' + F(m.total) + ' ریال', 15, true);
     doc.saveAndClose();
     var blob = Exp_export_(doc.getId(), 'format=docx', 'document').setName(name + '.docx');
     var saved = folder.createFile(blob);
@@ -5238,7 +5238,7 @@ function Simple_appendImages_(body, docs) {
     // ستون اول جدول در سمت چپ است؛ ترتیب معکوس تا رسید غذا سمت راست بیاید.
     pair.slice().reverse().forEach(function (blob, j) {
       var cell = t.getRow(0).getCell(j);
-      cell.setPaddingTop(2).setPaddingBottom(2).setPaddingLeft(2).setPaddingRight(2);
+      cell.setPaddingTop(0).setPaddingBottom(0).setPaddingLeft(0).setPaddingRight(0);
       var p = cell.getChild(0).asParagraph();
       p.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
       try {
@@ -5253,6 +5253,16 @@ function Simple_appendImages_(body, docs) {
       }
     });
   }
+}
+
+/** عنوان هر صفحه: «ناهار امیرکبیر شنبه ۲۵ آبان ۱۴۰۵ — غذای ۴ نفر»؛ مکان از تنظیم SIMPLE_REPORT_PLACE. */
+function Simple_title_(o) {
+  var place = Settings_str_('SIMPLE_REPORT_PLACE').trim();
+  return 'ناهار ' + (place ? place + ' ' : '') + Jal_formatLong_(o.date) + ' — غذای ' + Utils_formatNumberFa_(o.people.length) + ' نفر';
+}
+
+function Simple_payee_() {
+  return Settings_str_('SIMPLE_REPORT_PAYEE').trim() || 'تنخواه';
 }
 
 // ===========================================================================
