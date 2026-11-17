@@ -8,7 +8,8 @@
 
 /** صفحه A4 بدون حاشیه چپ و راست؛ هر عکس نصف عرض کامل صفحه (۲۹۷pt) تا اعداد رسید در چاپ خوانا باشند. */
 var SIMPLE_PAGE_ = { W: 595.28, H: 841.89, TOP: 18, BOTTOM: 18, TEXT_INDENT: 28 };
-var SIMPLE_IMG_ = { CELL_W: 297, MAX_H: 640, SINGLE_W: 595, UPSCALE: 3 };
+// ارتفاع عکس طوری محدود شده که عنوان + عکس‌ها + اسامی (۱–۲ خط) + خط واریز در یک صفحه A4 جا شوند.
+var SIMPLE_IMG_ = { CELL_W: 297, MAX_H: 600, SINGLE_W: 595, UPSCALE: 3 };
 var SIMPLE_STATUSES_ = ['READY_FOR_REVIEW', 'APPROVED', 'PAID'];
 
 function Simple_menu_(ctx) {
@@ -123,7 +124,7 @@ function Simple_generateDocx_(m) {
       if (idx > 0) body.appendPageBreak();
       para(Simple_title_(o), 16, true, CENTER);
       Simple_appendImages_(body, o.images);
-      o.people.forEach(function (p) { para(p.name, 14); });
+      para(o.people.map(function (p) { return p.name; }).join('  ،  '), 13);
       para('واریز ' + F(o.amount) + ' ریال به ' + Simple_payee_() + (o.approved ? '' : ' (در انتظار تأیید)'), 15, true);
     });
     body.appendPageBreak();

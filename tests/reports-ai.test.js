@@ -454,10 +454,11 @@ test('گزارش‌گیری ساده (Word): هر سفارش یک صفحه، د�
   assert.equal(imgs.length, 4);
   assert.ok(imgs.every((x) => x.inTable), 'عکس‌ها در جدول کنار هم، بدون هم‌پوشانی');
   assert.deepEqual([imgs[0].w, imgs[0].h], [297, 446], 'نصف عرض کامل صفحه، بدون حاشیه');
+  assert.ok(imgs.every((x) => x.h <= 600), 'جا شدن در یک صفحه');
   assert.equal(c.filter((x) => x.type === 'pagebreak').length, 2, 'هر سفارش یک صفحه + صفحه جمع');
   const text = c.filter((x) => x.type === 'p').map((x) => x.text).join('\n');
   assert.match(text, /ناهار امیرکبیر شنبه ۹ آبان ۱۴۰۵ — غذای ۳ نفر/);
-  assert.match(text, /^علی احمدی$/m);
+  assert.match(text, /^علی احمدی  ،  محمد رضایی  ،  رضا کریمی$/m, 'اسامی کنار هم در یک پاراگراف');
   assert.match(text, /^واریز ۱۰٬۵۰۰٬۰۰۰ ریال به تنخواه$/m);
   assert.match(text, /^واریز ۱٬۰۰۰٬۰۰۰ ریال به تنخواه \(در انتظار تأیید\)$/m);
   assert.ok(!/سهم|مبلغ فاکتور/.test(text), 'سهم و مبلغ فاکتور نوشته نمی‌شود');
