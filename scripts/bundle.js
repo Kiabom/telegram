@@ -11,7 +11,7 @@ const path = require('path');
 const SRC = path.join(__dirname, '..', 'apps-script');
 const OUT = path.join(__dirname, '..', 'dist');
 const ORDER = ['Config', 'Utils', 'Jalali', 'Money', 'Names', 'Finance', 'Db', 'Settings', 'Telegram', 'Auth',
-  'Documents', 'Requests', 'Wizard', 'FreeText', 'Admin', 'Join', 'Menu', 'Reports', 'Export', 'Ai', 'Router',
+  'Documents', 'Requests', 'Wizard', 'FreeText', 'Admin', 'Join', 'Menu', 'Reports', 'Export', 'SimpleReport', 'Ai', 'Router',
   'Setup', 'Triggers', 'SelfTest'];
 
 const files = fs.readdirSync(SRC).filter((f) => f.endsWith('.gs')).map((f) => f.replace(/\.gs$/, ''));

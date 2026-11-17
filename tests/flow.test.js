@@ -434,7 +434,6 @@ test('ارسال آزاد متنی: برداشت قاعده‌محور، تأی�
   bot.click(U.ali, 'تأیید همین افراد');
   bot.click(U.ali, 'از پیام شما');
   bot.click(U.ali, 'سهم مساوی');
-  bot.click(U.ali, 'رد شدن');
   bot.click(U.ali, 'تأیید و ثبت');
   const r = bot.lastRequest();
   assert.equal(r.status, 'READY_FOR_REVIEW');

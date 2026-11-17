@@ -1667,7 +1667,8 @@ var MENU_ = {
   PENDING: '🗂 درخواست‌های در انتظار',
   UNPAID: '💵 پرداخت‌نشده‌ها',
   REPORT: '📊 گزارش امروز',
-  RANGE: '📅 گزارش روز/بازه دلخواه'
+  RANGE: '📅 گزارش روز/بازه دلخواه',
+  SIMPLE: '🧾 گزارش‌گیری ساده'
 };
 
 /** کیبورد اصلی (Reply Keyboard) متناسب با نقش. */
@@ -1679,6 +1680,7 @@ function Kb_mainMenu_(auth) {
   }
   if (Auth_can_(auth, 'REVIEW')) rows.push([MENU_.PENDING, MENU_.UNPAID]);
   if (Auth_can_(auth, 'REPORT')) rows.push([MENU_.REPORT, MENU_.RANGE]);
+  if (Auth_can_(auth, 'AUDIT_REPORT')) rows.push([MENU_.SIMPLE]);
   rows.push([MENU_.HELP]);
   return {
     keyboard: rows.map(function (r) { return r.map(function (t) { return { text: t }; }); }),
@@ -2544,11 +2546,10 @@ var WIZ_STEPS_ = [
   {
     id: 'W_SHARE', label: 'مبلغ', applies: function (d) { return d.people.length > 1 && d.split === SPLIT.INDIVIDUAL; },
     done: Wiz_sharesOk_, undo: function (d) { d.shares = {}; d.rebalanced = false; }
-  },
-  { id: 'W_MERCHANT', label: 'مشخصات سفارش (اختیاری)', done: function (d) { return d.merchantDone; }, undo: function (d) { d.merchantDone = false; } }
+  }
 ];
 
-var WIZ_DISPLAY_ORDER_ = ['W_CHANNEL', 'W_PAYMENT', 'W_PURCHASE_DOCS', 'W_PAYMENT_DOCS', 'W_DATE', 'W_PEOPLE', 'W_PAYER', 'W_TOTAL', 'W_MERCHANT'];
+var WIZ_DISPLAY_ORDER_ = ['W_CHANNEL', 'W_PAYMENT', 'W_PURCHASE_DOCS', 'W_PAYMENT_DOCS', 'W_DATE', 'W_PEOPLE', 'W_PAYER', 'W_TOTAL'];
 
 function Wiz_applies_(step, d) {
   return !step.applies || step.applies(d);
@@ -2901,13 +2902,6 @@ var WIZ_VIEWS_ = {
     };
   },
 
-  W_MERCHANT: function (ctx, d, seq) {
-    return {
-      text: '(اختیاری) نام رستوران/فروشگاه و شماره سفارش یا فاکتور را بنویسید.\nمثال: «رستوران نمونه — سفارش ۱۲۳۴۵۶۷»',
-      rows: [[Btn_('⏭ رد شدن', WB_(seq, 'mskip'))], Wiz_navRow_(seq)]
-    };
-  },
-
   W_SUMMARY: function (ctx, d, seq) {
     if (d.sub === 'EDIT_MENU') {
       return {
@@ -2917,7 +2911,6 @@ var WIZ_VIEWS_ = {
           [Btn_('مدارک خرید', WB_(seq, 'e', 'pd')), Btn_('مدارک پرداخت', WB_(seq, 'e', 'yd'))],
           [Btn_('تاریخ', WB_(seq, 'e', 'dt')), Btn_('افراد', WB_(seq, 'e', 'pp'))],
           [Btn_('پرداخت‌کننده', WB_(seq, 'e', 'py')), Btn_('مبلغ و سهم‌ها', WB_(seq, 'e', 'am'))],
-          [Btn_('مشخصات سفارش', WB_(seq, 'e', 'mr'))],
           [Btn_('⬅️ بازگشت به خلاصه', WB_(seq, 'e', 'x'))]
         ]
       };
@@ -3146,9 +3139,6 @@ function Wiz_onCallback_(ctx, seq, act, arg) {
       d.shares = {};
       d.rebalanced = false;
       break;
-    case 'mskip':
-      d.merchantDone = true;
-      break;
     case 'submit':
       if (step !== 'W_SUMMARY') break;
       return Wiz_submit_(ctx);
@@ -3195,7 +3185,6 @@ function Wiz_applyEdit_(d, what) {
     case 'pp': d.peopleDone = false; break;
     case 'py': d.payerDone = false; break;
     case 'am': d.total = null; d.split = null; d.shares = {}; d.nonEligDone = false; d.nonElig = 0; d.rebalanced = false; break;
-    case 'mr': d.merchantDone = false; break;
   }
 }
 
@@ -3255,15 +3244,6 @@ function Wiz_onText_(ctx, text) {
     if (Wiz_sharesComplete_(d)) return Wiz_render_(ctx, 'لطفاً یکی از گزینه‌ها را انتخاب کنید.');
     var nextId = d.people.filter(function (id) { return d.shares[id] === undefined; })[0];
     return Wiz_amountInput_(ctx, d, 'SHARE', Money_parseAmount_(text), nextId);
-  }
-
-  if (step === 'W_MERCHANT') {
-    var norm = Utils_normalizeDigits_(text);
-    var num = norm.match(/\d{4,}/);
-    d.orderNo = num ? num[0] : '';
-    d.merchant = Utils_truncate_(norm.replace(num ? num[0] : '', '').replace(/(شماره\s*)?(سفارش|فاکتور|رسید)\s*[:：]?/g, '').replace(/[\s\-—:،,]+$/g, '').replace(/^[\s\-—:،,]+/g, '').trim(), 100);
-    d.merchantDone = true;
-    return Wiz_render_(ctx);
   }
 
   if (step === 'W_PURCHASE_DOCS' || step === 'W_PAYMENT_DOCS') {
@@ -3333,7 +3313,7 @@ function Wiz_onFile_(ctx, info, prefetched) {
 
 function Wiz_onVoice_(ctx, d, req, info, prefetched) {
   Doc_save_(ctx, req, DOC_KIND.VOICE_NOTE, info, prefetched);
-  var textSteps = ['W_PEOPLE', 'W_TOTAL', 'W_NONELIG', 'W_SHARE', 'W_MERCHANT', 'W_DATE', 'W_PAYER'];
+  var textSteps = ['W_PEOPLE', 'W_TOTAL', 'W_NONELIG', 'W_SHARE', 'W_DATE', 'W_PAYER'];
   var step = Wiz_resolve_(d);
   if (textSteps.indexOf(step) < 0 || !Ai_isEnabled_('voice') || ctx.auth.employee.ai_consent !== 'YES') {
     return Wiz_render_(ctx, '🎙 ویس دریافت شد و برای بررسی ادمین در پرونده ماند؛ لطفاً جزئیات را به‌صورت متنی یا با دکمه‌ها وارد کنید.');
@@ -5092,6 +5072,190 @@ function Exp_evidenceBlob_(pg) {
 }
 
 // ===========================================================================
+// SimpleReport.gs
+// ===========================================================================
+/**
+ * SimpleReport.gs — «گزارش‌گیری ساده»: فایل Word (.docx) برای هر سفارش یک صفحه:
+ *   عنوان (تاریخ و تعداد نفرات)، دو عکس بزرگ کنار هم (رسید غذا و رسید پرداخت، بدون هم‌پوشانی)،
+ *   و زیر عکس‌ها نام افراد با سهم هر نفر و مبلغ واریز به پرداخت‌کننده.
+ * فایل با Google Docs ساخته و با Export رسمی به docx تبدیل می‌شود؛ گزارش‌های Excel/PDF قبلی تغییری نکرده‌اند.
+ * فقط ادمین مالی و مالک (تصاویر رسیدها محرمانه‌اند).
+ */
+
+var SIMPLE_IMG_ = { CELL_W: 250, MAX_H: 470, SINGLE_W: 470, UPSCALE: 2 };
+var SIMPLE_STATUSES_ = ['READY_FOR_REVIEW', 'APPROVED', 'PAID'];
+
+function Simple_menu_(ctx) {
+  if (!Adm_require_(ctx, 'AUDIT_REPORT')) return;
+  Ui_send_(ctx, '🧾 <b>گزارش‌گیری ساده (فایل Word)</b>\nبرای هر سفارش: عکس رسید غذا و رسید پرداخت، افراد و سهم هر نفر.\nگزارش کدام روز را می‌خواهید؟',
+    Kb_inline_([
+      [Btn_('امروز', 'sw|t'), Btn_('دیروز', 'sw|y')],
+      [Btn_('📆 یک روز دلخواه', 'sw|d'), Btn_('🗓 از تاریخ تا تاریخ', 'sw|r')]
+    ]));
+}
+
+function Simple_onMenuCallback_(ctx, act) {
+  if (!Adm_require_(ctx, 'AUDIT_REPORT')) return;
+  var today = Utils_todayIso_();
+  var ex = Utils_faDigits_(Jal_isoToJalali_(Utils_isoAddDays_(today, -3)));
+  if (act === 't') { Ui_reply_(ctx, '🧾 گزارش ساده امروز'); return Simple_run_(ctx, today, today); }
+  if (act === 'y') { var y = Utils_isoAddDays_(today, -1); Ui_reply_(ctx, '🧾 گزارش ساده دیروز'); return Simple_run_(ctx, y, y); }
+  if (act === 'd') {
+    ctx.sess.data_json.pi = { k: 'SIMPLE_DAY' };
+    return Ui_reply_(ctx, '📆 تاریخ را به شمسی بنویسید؛ مثلاً ' + ex + '\nبرای انصراف: /cancel');
+  }
+  if (act === 'r') {
+    ctx.sess.data_json.pi = { k: 'SIMPLE_RANGE' };
+    return Ui_reply_(ctx, '🗓 هر دو تاریخ را بنویسید؛ مثلاً «' + ex + ' تا ' + Utils_faDigits_(Jal_isoToJalali_(today)) + '»\nبرای انصراف: /cancel');
+  }
+  Ui_toast_(ctx, '');
+}
+
+function Simple_onDateText_(ctx, text) {
+  var pi = ctx.sess.data_json.pi;
+  var today = Utils_todayIso_();
+  var dates = Utils_normalizeDigits_(text).split(/\s*(?:تا|الی|to|–|—)\s*|\s+/).filter(Boolean)
+    .map(function (p) { return Jal_parseUserDate_(p, today); });
+  var need = pi.k === 'SIMPLE_DAY' ? 1 : 2;
+  if (dates.length < need || dates.some(function (d) { return !d; })) {
+    return Ui_send_(ctx, '⚠️ تاریخ قابل تشخیص نیست. نمونه: ' + Utils_faDigits_(Jal_isoToJalali_(today)) +
+      (need === 2 ? ' تا ' + Utils_faDigits_(Jal_isoToJalali_(today)) : '') + ' (انصراف: /cancel)');
+  }
+  if (dates.some(function (d) { return d > today; })) return Ui_send_(ctx, '⚠️ تاریخ نمی‌تواند در آینده باشد.');
+  delete ctx.sess.data_json.pi;
+  var from = dates[0], to = need === 2 ? dates[1] : dates[0];
+  if (from > to) { var x = from; from = to; to = x; }
+  Simple_run_(ctx, from, to);
+}
+
+function Simple_run_(ctx, from, to) {
+  if (Utils_isoDiffDays_(from, to) > 31) return Ui_send_(ctx, '⚠️ حداکثر بازه گزارش ساده ۳۱ روز است.');
+  Ui_send_(ctx, '⏳ در حال تهیه فایل Word…');
+  var chatId = ctx.chatId, actor = ctx.tgId;
+  ctx.defer(function () {
+    try {
+      var m = Simple_build_(from, to);
+      if (!m.orders.length) return Tg_trySend_(chatId, 'برای ' + m.title + ' سفارش ثبت‌شده‌ای وجود ندارد.');
+      var file = Simple_generateDocx_(m);
+      Tg_sendDocument_(chatId, file.blob, '🧾 ' + m.title + ' — ' + Utils_faDigits_(m.orders.length) + ' سفارش، جمع ' + Utils_formatRial_(m.total));
+      Audit_log_('', actor, 'SIMPLE_REPORT', '', '', { from: from, to: to, orders: m.orders.length, drive_file_id: file.id });
+    } catch (e) {
+      Audit_error_('SIMPLE_REPORT', e, actor);
+      Tg_trySend_(chatId, '⚠️ تهیه فایل Word ناموفق بود. خطا ثبت شد؛ لطفاً دوباره امتحان کنید.');
+    }
+  });
+}
+
+/** مدل: سفارش‌های ثبت‌شده بازه (در انتظار بررسی، تأییدشده، پرداخت‌شده). */
+function Simple_build_(from, to) {
+  var reqs = Db_find_(SHEETS.REQUESTS, function (r) {
+    return r.order_date_iso >= from && r.order_date_iso <= to && SIMPLE_STATUSES_.indexOf(r.status) >= 0;
+  }).sort(function (a, b) { return (a.order_date_iso + a.submitted_at).localeCompare(b.order_date_iso + b.submitted_at); });
+  var total = 0;
+  var orders = reqs.map(function (r) {
+    var approved = r.status === STATUS.APPROVED || r.status === STATUS.PAID;
+    var people = Req_bens_(r.request_id).map(function (b) {
+      return { name: b.employee_name_snapshot, share: approved ? b.approved_allocation_rial : b.actual_cost_rial, cost: b.actual_cost_rial };
+    });
+    var amount = approved ? r.approved_reimbursement_rial : r.calculated_reimbursement_rial;
+    total += amount;
+    var docs = Doc_forRequest_(r.request_id);
+    return {
+      request_id: r.request_id, date: r.order_date_iso, status: r.status, payer: Emp_name_(r.payer_employee_id),
+      people: people, claimed: r.claimed_total_rial, amount: amount, approved: approved,
+      images: docs.filter(function (d) { return d.document_kind === DOC_KIND.PURCHASE; })
+        .concat(docs.filter(function (d) { return PAYMENT_DOC_KINDS.indexOf(d.document_kind) >= 0; }))
+    };
+  });
+  var title = from === to ? 'گزارش ناهار ' + Jal_formatLong_(from) : 'گزارش ناهار ' + Jal_formatLong_(from, false) + ' تا ' + Jal_formatLong_(to, false);
+  return { from: from, to: to, title: title, orders: orders, total: total };
+}
+
+function Simple_generateDocx_(m) {
+  var font = Settings_str_('REPORT_FONT') || 'Vazirmatn';
+  var folder = Exp_reportsFolder_();
+  var stamp = Utilities.formatDate(CLOCK.now(), APP.TZ, 'yyyyMMdd-HHmmss');
+  var name = 'گزارش-ساده-ناهار_' + Jal_isoToJalali_(m.from).replace(/\//g, '-') + (m.to !== m.from ? '_تا_' + Jal_isoToJalali_(m.to).replace(/\//g, '-') : '') + '_' + stamp;
+  var doc = DocumentApp.create(name);
+  var tmp = DriveApp.getFileById(doc.getId());
+  tmp.moveTo(folder);
+  try {
+    var body = doc.getBody();
+    body.setPageWidth(595.28).setPageHeight(841.89).setMarginTop(36).setMarginBottom(36).setMarginLeft(36).setMarginRight(36);
+    var first = true;
+    var CENTER = DocumentApp.HorizontalAlignment.CENTER, RIGHT = DocumentApp.HorizontalAlignment.RIGHT;
+    function para(text, size, bold, align) {
+      var p;
+      if (first) { p = body.getParagraphs()[0]; p.setText(text); first = false; } else p = body.appendParagraph(text);
+      p.setLeftToRight(false).setAlignment(align || RIGHT).setSpacingBefore(0).setSpacingAfter(4);
+      if (text) p.editAsText().setFontFamily(font).setFontSize(size || 13).setBold(!!bold);
+      return p;
+    }
+    var F = Utils_formatNumberFa_;
+    m.orders.forEach(function (o, idx) {
+      if (idx > 0) body.appendPageBreak();
+      para('ناهار ' + Jal_formatLong_(o.date) + ' — غذای ' + F(o.people.length) + ' نفر', 16, true, CENTER);
+      Simple_appendImages_(body, o.images);
+      para('افراد و سهم هر نفر:', 13, true);
+      o.people.forEach(function (p, i) {
+        para(F(i + 1) + '. ' + p.name + ' — سهم ' + F(p.share) + ' ریال' + (p.share !== p.cost ? ' (هزینه واقعی ' + F(p.cost) + ')' : ''), 13);
+      });
+      para('مبلغ فاکتور: ' + F(o.claimed) + ' ریال', 12);
+      para((o.status === STATUS.PAID ? 'واریز ' : o.approved ? 'قابل واریز ' : 'در انتظار تأیید — مبلغ تخمینی ') +
+        F(o.amount) + ' ریال به ' + o.payer, 15, true);
+    });
+    body.appendPageBreak();
+    para(m.title + ' — جمع کل', 16, true, CENTER);
+    m.orders.forEach(function (o, i) {
+      para(F(i + 1) + '. ' + Jal_formatShortFa_(o.date) + ' — ' + o.payer + ' — ' + F(o.people.length) + ' نفر — ' + F(o.amount) + ' ریال', 12);
+    });
+    para('جمع کل: ' + F(m.total) + ' ریال', 15, true);
+    doc.saveAndClose();
+    var blob = Exp_export_(doc.getId(), 'format=docx', 'document').setName(name + '.docx');
+    var saved = folder.createFile(blob);
+    return { blob: blob, id: saved.getId() };
+  } finally {
+    try { tmp.setTrashed(true); } catch (e) { console.warn('temp simple doc trash failed'); }
+  }
+}
+
+/** عکس‌ها دوتا‌دوتا کنار هم در جدول بدون خط (بدون هم‌پوشانی)، بزرگ و کامل. */
+function Simple_appendImages_(body, docs) {
+  var blobs = docs.map(function (d) {
+    if (String(d.mime_type || '').indexOf('image/') !== 0) return null;
+    return Exp_evidenceBlob_({ drive_file_id: d.drive_file_id, telegram_file_id: d.telegram_file_id, file_size: d.file_size, mime_type: d.mime_type });
+  }).filter(Boolean);
+  if (!blobs.length) {
+    body.appendParagraph('(تصویر رسیدی برای این سفارش در دسترس نیست)').setLeftToRight(false).setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+    return;
+  }
+  var single = blobs.length === 1;
+  var cellW = single ? SIMPLE_IMG_.SINGLE_W : SIMPLE_IMG_.CELL_W;
+  for (var i = 0; i < blobs.length; i += 2) {
+    var pair = blobs.slice(i, i + 2);
+    var t = body.appendTable([pair.map(function () { return ''; })]);
+    t.setBorderWidth(0);
+    // ستون اول جدول در سمت چپ است؛ ترتیب معکوس تا رسید غذا سمت راست بیاید.
+    pair.slice().reverse().forEach(function (blob, j) {
+      var cell = t.getRow(0).getCell(j);
+      cell.setPaddingTop(2).setPaddingBottom(2).setPaddingLeft(2).setPaddingRight(2);
+      var p = cell.getChild(0).asParagraph();
+      p.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+      try {
+        var img = p.appendInlineImage(blob);
+        var w = img.getWidth(), h = img.getHeight();
+        if (w > 0 && h > 0) {
+          var r = Math.min(cellW / w, SIMPLE_IMG_.MAX_H / h, SIMPLE_IMG_.UPSCALE);
+          img.setWidth(Math.round(w * r)).setHeight(Math.round(h * r));
+        }
+      } catch (e) {
+        p.appendText('(تصویر قابل درج نبود)');
+      }
+    });
+  }
+}
+
+// ===========================================================================
 // Ai.gs
 // ===========================================================================
 /**
@@ -5498,6 +5662,7 @@ function Router_menuCommand_(text) {
   map[MENU_.BALANCE] = 'balance';
   map[MENU_.HELP] = 'help';
   map[MENU_.RANGE] = 'reportmenu';
+  map[MENU_.SIMPLE] = 'simplereport';
   map[MENU_.PENDING] = 'pending';
   map[MENU_.UNPAID] = 'unpaid';
   map[MENU_.REPORT] = 'dailyreport';
@@ -5521,6 +5686,7 @@ function Router_dispatch_(ctx) {
     if (!ownerAdminCmd) return Join_handle_(ctx);
   }
   if (cmd) return Router_command_(ctx, cmd.name, cmd.args);
+  if (s.data_json.pi && /^SIMPLE_/.test(s.data_json.pi.k) && ctx.text) return Simple_onDateText_(ctx, ctx.text);
   if (s.data_json.pi && /^RANGE_/.test(s.data_json.pi.k) && ctx.text) return Rep_onRangeText_(ctx, ctx.text);
   if (s.data_json.pi && ctx.text) return Adm_onPendingText_(ctx, ctx.text);
   var paidInfo = s.data_json.pi && (s.data_json.pi.k === 'PAID_PHOTO' || s.data_json.pi.k === 'PAID_REF') ? Doc_fileInfo_(ctx.msg) : null;
@@ -5559,6 +5725,7 @@ function Router_command_(ctx, name, args) {
     case 'export': return Rep_command_(ctx, 'export', args);
     case 'reports': return Rep_listArchive_(ctx);
     case 'reportmenu': return Rep_menu_(ctx);
+    case 'simplereport': return Simple_menu_(ctx);
     case 'employees': return Adm_employees_(ctx, 0);
     case 'settings': return Adm_settings_(ctx);
     case 'set': return Adm_set_(ctx, args);
@@ -5596,6 +5763,7 @@ function Router_callback_(ctx) {
     case 'em': return Adm_onEmployeeCallback_(ctx, parts[1], parts[2], parts[3]);
     case 'my': return Menu_onCallback_(ctx, parts[1], parts[2]);
     case 'rp': return Rep_onMenuCallback_(ctx, parts[1]);
+    case 'sw': return Simple_onMenuCallback_(ctx, parts[1]);
   }
   Ui_toast_(ctx, 'این دکمه دیگر معتبر نیست.', true);
 }

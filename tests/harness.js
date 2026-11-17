@@ -128,7 +128,7 @@ function createStandardBot(opts = {}) {
 /**
  * پیمودن کامل فرم ثبت درخواست.
  * o: {user, channel:'online'|'inperson', payment:'bank'|'credit'|'mixed', people:'خودم، محمد و رضا', payer:'self'|name,
- *     total:'1260000', unit:'T'|'R'|null, split:'equal'|'individual', shares:[...], merchant:null|'text'}
+ *     total:'1260000', unit:'T'|'R'|null, split:'equal'|'individual', shares:[...]}
  */
 function submitRequest(bot, o) {
   const user = o.user;
@@ -154,7 +154,6 @@ function submitRequest(bot, o) {
     (o.shares || []).forEach((s) => bot.send(user, s));
     if (o.mismatch) bot.click(user, o.mismatch);
   }
-  if (o.merchant) bot.send(user, o.merchant); else bot.click(user, 'رد شدن');
   if (o.noSubmit) return null;
   bot.click(user, 'تأیید و ثبت');
   const m = bot.last(user).match(/LR-[0-9]{6}-[A-Z0-9]{4,8}/);

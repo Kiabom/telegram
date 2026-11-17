@@ -316,8 +316,10 @@ function createEnv(opts = {}) {
       if (url.startsWith('https://docs.google.com/document/d/')) {
         const id = url.split('/')[5];
         const doc = env.documents.get(id);
-        env.exports.push({ id, fmt: 'pdf', url, kind: 'document', content: doc ? JSON.parse(JSON.stringify(doc.content)) : [], closed: doc && doc.closed });
+        const dfmt = (url.match(/format=(\w+)/) || [])[1];
+        env.exports.push({ id, fmt: dfmt, url, kind: 'document', name: doc && doc.name, content: doc ? JSON.parse(JSON.stringify(doc.content)) : [], closed: doc && doc.closed });
         if (env.exportFail) return response(env.exportFail, 'error');
+        if (dfmt === 'docx') return response(200, '', new Blob(Buffer.from('PK\u0003\u0004fake-docx'), 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'export.docx'));
         return response(200, '', new Blob(Buffer.from('%PDF-1.4 fake-doc'), 'application/pdf', 'export.pdf'));
       }
       if (url.startsWith('https://docs.google.com/spreadsheets/d/')) {
@@ -383,7 +385,18 @@ function createEnv(opts = {}) {
         appendPageBreak: () => { doc.content.push({ type: 'pagebreak' }); return chainProxy({}); },
         appendTable: (cells) => {
           doc.content.push({ type: 'table', cells: JSON.parse(JSON.stringify(cells)) });
-          const cell = chainProxy({ getChild: () => chainProxy({ asParagraph: () => chainProxy({ editAsText: () => chainProxy({}) }) }) });
+          const cellPara = chainProxy({
+            editAsText: () => chainProxy({}),
+            appendInlineImage: (blob) => {
+              if (env.imageFail) throw new Error('Invalid image data');
+              const item = { type: 'image', inTable: true, bytes: blob.getDataAsString(), w: 800, h: 1200 };
+              doc.content.push(item);
+              const img = chainProxy({ getWidth: () => item.w, getHeight: () => item.h,
+                setWidth: (w) => { item.w = w; return img; }, setHeight: (h) => { item.h = h; return img; } });
+              return img;
+            }
+          });
+          const cell = chainProxy({ getChild: () => chainProxy({ asParagraph: () => cellPara }) });
           return chainProxy({ getRow: () => chainProxy({ getCell: () => cell }) });
         },
         appendImage: (blob) => {

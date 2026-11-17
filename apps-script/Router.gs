@@ -166,6 +166,7 @@ function Router_menuCommand_(text) {
   map[MENU_.BALANCE] = 'balance';
   map[MENU_.HELP] = 'help';
   map[MENU_.RANGE] = 'reportmenu';
+  map[MENU_.SIMPLE] = 'simplereport';
   map[MENU_.PENDING] = 'pending';
   map[MENU_.UNPAID] = 'unpaid';
   map[MENU_.REPORT] = 'dailyreport';
@@ -189,6 +190,7 @@ function Router_dispatch_(ctx) {
     if (!ownerAdminCmd) return Join_handle_(ctx);
   }
   if (cmd) return Router_command_(ctx, cmd.name, cmd.args);
+  if (s.data_json.pi && /^SIMPLE_/.test(s.data_json.pi.k) && ctx.text) return Simple_onDateText_(ctx, ctx.text);
   if (s.data_json.pi && /^RANGE_/.test(s.data_json.pi.k) && ctx.text) return Rep_onRangeText_(ctx, ctx.text);
   if (s.data_json.pi && ctx.text) return Adm_onPendingText_(ctx, ctx.text);
   var paidInfo = s.data_json.pi && (s.data_json.pi.k === 'PAID_PHOTO' || s.data_json.pi.k === 'PAID_REF') ? Doc_fileInfo_(ctx.msg) : null;
@@ -227,6 +229,7 @@ function Router_command_(ctx, name, args) {
     case 'export': return Rep_command_(ctx, 'export', args);
     case 'reports': return Rep_listArchive_(ctx);
     case 'reportmenu': return Rep_menu_(ctx);
+    case 'simplereport': return Simple_menu_(ctx);
     case 'employees': return Adm_employees_(ctx, 0);
     case 'settings': return Adm_settings_(ctx);
     case 'set': return Adm_set_(ctx, args);
@@ -264,6 +267,7 @@ function Router_callback_(ctx) {
     case 'em': return Adm_onEmployeeCallback_(ctx, parts[1], parts[2], parts[3]);
     case 'my': return Menu_onCallback_(ctx, parts[1], parts[2]);
     case 'rp': return Rep_onMenuCallback_(ctx, parts[1]);
+    case 'sw': return Simple_onMenuCallback_(ctx, parts[1]);
   }
   Ui_toast_(ctx, 'این دکمه دیگر معتبر نیست.', true);
 }

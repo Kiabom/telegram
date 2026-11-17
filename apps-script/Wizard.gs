@@ -55,11 +55,10 @@ var WIZ_STEPS_ = [
   {
     id: 'W_SHARE', label: 'مبلغ', applies: function (d) { return d.people.length > 1 && d.split === SPLIT.INDIVIDUAL; },
     done: Wiz_sharesOk_, undo: function (d) { d.shares = {}; d.rebalanced = false; }
-  },
-  { id: 'W_MERCHANT', label: 'مشخصات سفارش (اختیاری)', done: function (d) { return d.merchantDone; }, undo: function (d) { d.merchantDone = false; } }
+  }
 ];
 
-var WIZ_DISPLAY_ORDER_ = ['W_CHANNEL', 'W_PAYMENT', 'W_PURCHASE_DOCS', 'W_PAYMENT_DOCS', 'W_DATE', 'W_PEOPLE', 'W_PAYER', 'W_TOTAL', 'W_MERCHANT'];
+var WIZ_DISPLAY_ORDER_ = ['W_CHANNEL', 'W_PAYMENT', 'W_PURCHASE_DOCS', 'W_PAYMENT_DOCS', 'W_DATE', 'W_PEOPLE', 'W_PAYER', 'W_TOTAL'];
 
 function Wiz_applies_(step, d) {
   return !step.applies || step.applies(d);
@@ -412,13 +411,6 @@ var WIZ_VIEWS_ = {
     };
   },
 
-  W_MERCHANT: function (ctx, d, seq) {
-    return {
-      text: '(اختیاری) نام رستوران/فروشگاه و شماره سفارش یا فاکتور را بنویسید.\nمثال: «رستوران نمونه — سفارش ۱۲۳۴۵۶۷»',
-      rows: [[Btn_('⏭ رد شدن', WB_(seq, 'mskip'))], Wiz_navRow_(seq)]
-    };
-  },
-
   W_SUMMARY: function (ctx, d, seq) {
     if (d.sub === 'EDIT_MENU') {
       return {
@@ -428,7 +420,6 @@ var WIZ_VIEWS_ = {
           [Btn_('مدارک خرید', WB_(seq, 'e', 'pd')), Btn_('مدارک پرداخت', WB_(seq, 'e', 'yd'))],
           [Btn_('تاریخ', WB_(seq, 'e', 'dt')), Btn_('افراد', WB_(seq, 'e', 'pp'))],
           [Btn_('پرداخت‌کننده', WB_(seq, 'e', 'py')), Btn_('مبلغ و سهم‌ها', WB_(seq, 'e', 'am'))],
-          [Btn_('مشخصات سفارش', WB_(seq, 'e', 'mr'))],
           [Btn_('⬅️ بازگشت به خلاصه', WB_(seq, 'e', 'x'))]
         ]
       };
@@ -657,9 +648,6 @@ function Wiz_onCallback_(ctx, seq, act, arg) {
       d.shares = {};
       d.rebalanced = false;
       break;
-    case 'mskip':
-      d.merchantDone = true;
-      break;
     case 'submit':
       if (step !== 'W_SUMMARY') break;
       return Wiz_submit_(ctx);
@@ -706,7 +694,6 @@ function Wiz_applyEdit_(d, what) {
     case 'pp': d.peopleDone = false; break;
     case 'py': d.payerDone = false; break;
     case 'am': d.total = null; d.split = null; d.shares = {}; d.nonEligDone = false; d.nonElig = 0; d.rebalanced = false; break;
-    case 'mr': d.merchantDone = false; break;
   }
 }
 
@@ -766,15 +753,6 @@ function Wiz_onText_(ctx, text) {
     if (Wiz_sharesComplete_(d)) return Wiz_render_(ctx, 'لطفاً یکی از گزینه‌ها را انتخاب کنید.');
     var nextId = d.people.filter(function (id) { return d.shares[id] === undefined; })[0];
     return Wiz_amountInput_(ctx, d, 'SHARE', Money_parseAmount_(text), nextId);
-  }
-
-  if (step === 'W_MERCHANT') {
-    var norm = Utils_normalizeDigits_(text);
-    var num = norm.match(/\d{4,}/);
-    d.orderNo = num ? num[0] : '';
-    d.merchant = Utils_truncate_(norm.replace(num ? num[0] : '', '').replace(/(شماره\s*)?(سفارش|فاکتور|رسید)\s*[:：]?/g, '').replace(/[\s\-—:،,]+$/g, '').replace(/^[\s\-—:،,]+/g, '').trim(), 100);
-    d.merchantDone = true;
-    return Wiz_render_(ctx);
   }
 
   if (step === 'W_PURCHASE_DOCS' || step === 'W_PAYMENT_DOCS') {
@@ -844,7 +822,7 @@ function Wiz_onFile_(ctx, info, prefetched) {
 
 function Wiz_onVoice_(ctx, d, req, info, prefetched) {
   Doc_save_(ctx, req, DOC_KIND.VOICE_NOTE, info, prefetched);
-  var textSteps = ['W_PEOPLE', 'W_TOTAL', 'W_NONELIG', 'W_SHARE', 'W_MERCHANT', 'W_DATE', 'W_PAYER'];
+  var textSteps = ['W_PEOPLE', 'W_TOTAL', 'W_NONELIG', 'W_SHARE', 'W_DATE', 'W_PAYER'];
   var step = Wiz_resolve_(d);
   if (textSteps.indexOf(step) < 0 || !Ai_isEnabled_('voice') || ctx.auth.employee.ai_consent !== 'YES') {
     return Wiz_render_(ctx, '🎙 ویس دریافت شد و برای بررسی ادمین در پرونده ماند؛ لطفاً جزئیات را به‌صورت متنی یا با دکمه‌ها وارد کنید.');

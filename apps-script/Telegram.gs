@@ -179,7 +179,8 @@ var MENU_ = {
   PENDING: '🗂 درخواست‌های در انتظار',
   UNPAID: '💵 پرداخت‌نشده‌ها',
   REPORT: '📊 گزارش امروز',
-  RANGE: '📅 گزارش روز/بازه دلخواه'
+  RANGE: '📅 گزارش روز/بازه دلخواه',
+  SIMPLE: '🧾 گزارش‌گیری ساده'
 };
 
 /** کیبورد اصلی (Reply Keyboard) متناسب با نقش. */
@@ -191,6 +192,7 @@ function Kb_mainMenu_(auth) {
   }
   if (Auth_can_(auth, 'REVIEW')) rows.push([MENU_.PENDING, MENU_.UNPAID]);
   if (Auth_can_(auth, 'REPORT')) rows.push([MENU_.REPORT, MENU_.RANGE]);
+  if (Auth_can_(auth, 'AUDIT_REPORT')) rows.push([MENU_.SIMPLE]);
   rows.push([MENU_.HELP]);
   return {
     keyboard: rows.map(function (r) { return r.map(function (t) { return { text: t }; }); }),

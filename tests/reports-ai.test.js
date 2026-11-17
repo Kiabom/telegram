@@ -148,7 +148,6 @@ test('PDF روزانه: مدرک PDF یا تصویر خراب به‌جای قط
   bot.click(U.ali, 'تأیید همین افراد');
   bot.click(U.ali, 'خودم');
   bot.send(U.ali, '2000000 ریال');
-  bot.click(U.ali, 'رد شدن');
   bot.click(U.ali, 'تأیید و ثبت');
   bot.env.imageFail = true;
   bot.send(U.admin, '/dailyreport');
@@ -257,7 +256,6 @@ test('AI: پیشنهاد مبلغ از تصویر فقط با تأیید کار�
   assert.equal(bot.rows('Requests').pop().claimed_total_rial, 0, 'مبلغ بدون تأیید کاربر ثبت نمی‌شود');
   bot.click(U.ali, '۱۲٬۶۰۰٬۰۰۰ ریال — از تصویر فاکتور');
   bot.click(U.ali, 'سهم مساوی');
-  bot.click(U.ali, 'رد شدن');
   assert.match(bot.last(U.ali), /احتمالاً تصویر فقط موجودی اعتبار است/);
   bot.click(U.ali, 'تأیید و ثبت');
   const r = bot.lastRequest();
@@ -297,7 +295,6 @@ test('AI: خطای 429 (سهمیه) → فرم دستی بدون وقفه، AI �
   assert.equal(bot.findButton(U.ali, 'از تصویر فاکتور'), null);
   bot.send(U.ali, '1260000 تومان');
   bot.click(U.ali, 'سهم مساوی');
-  bot.click(U.ali, 'رد شدن');
   bot.click(U.ali, 'تأیید و ثبت');
   assert.equal(bot.lastRequest().status, 'READY_FOR_REVIEW');
   assert.equal(bot.env.cache.get('ai_suspended'), 'QUOTA');
@@ -441,4 +438,45 @@ test('گزارش روز/بازه دلخواه از منو: دکمه‌های آ�
   assert.equal(lastPdf().content.filter((x) => x.type === 'image').length, 0, 'ناظر پیوست تصویر ندارد');
   bot.send(U.ali, '📅 گزارش روز/بازه دلخواه');
   assert.match(bot.last(U.ali), /فقط برای نقش‌های مجاز/);
+});
+
+test('گزارش‌گیری ساده (Word): هر سفارش یک صفحه، دو عکس کنار هم، افراد و سهم زیر عکس‌ها', () => {
+  const bot = createStandardBot();
+  const a = submitRequest(bot, { user: U.ali, people: 'خودم، محمد و رضا', total: '1260000', unit: 'T', split: 'equal' });
+  submitRequest(bot, { user: U.sara, total: '1000000 ریال' });
+  approve(bot, a);
+  bot.send(U.admin, '🧾 گزارش‌گیری ساده');
+  bot.click(U.admin, 'امروز');
+  const exp = bot.env.exports.filter((e) => e.fmt === 'docx').pop();
+  assert.ok(exp, 'فایل Word ساخته شد');
+  const c = exp.content;
+  const imgs = c.filter((x) => x.type === 'image');
+  assert.equal(imgs.length, 4);
+  assert.ok(imgs.every((x) => x.inTable), 'عکس‌ها در جدول کنار هم، بدون هم‌پوشانی');
+  assert.deepEqual([imgs[0].w, imgs[0].h], [250, 375]);
+  assert.equal(c.filter((x) => x.type === 'pagebreak').length, 2, 'هر سفارش یک صفحه + صفحه جمع');
+  const text = c.filter((x) => x.type === 'p').map((x) => x.text).join('\n');
+  assert.match(text, /ناهار شنبه ۹ آبان ۱۴۰۵ — غذای ۳ نفر/);
+  assert.match(text, /۱\. علی احمدی — سهم ۳٬۵۰۰٬۰۰۰ ریال \(هزینه واقعی ۴٬۲۰۰٬۰۰۰\)/);
+  assert.match(text, /قابل واریز ۱۰٬۵۰۰٬۰۰۰ ریال به علی احمدی/);
+  assert.match(text, /در انتظار تأیید — مبلغ تخمینی ۱٬۰۰۰٬۰۰۰ ریال به سارا محمدی/);
+  assert.match(text, /جمع کل: ۱۱٬۵۰۰٬۰۰۰ ریال/);
+  const sent = bot.tg.documents.filter((d) => /\.docx$/.test(d.name)).pop();
+  assert.ok(sent && sent.chat_id === String(U.admin.id));
+  assert.equal(sent.bytes.slice(0, 2).toString(), 'PK');
+  bot.send(U.admin, '🧾 گزارش‌گیری ساده');
+  bot.click(U.admin, 'یک روز دلخواه');
+  bot.send(U.admin, '۱۴۰۵/۰۸/۰۵');
+  assert.match(bot.last(U.admin), /سفارش ثبت‌شده‌ای وجود ندارد/);
+  bot.send(U.viewer, '🧾 گزارش‌گیری ساده');
+  assert.match(bot.last(U.viewer), /فقط برای نقش‌های مجاز/);
+});
+
+test('فرم ثبت دیگر مرحله «نام رستوران» ندارد', () => {
+  const bot = createStandardBot();
+  const rid = submitRequest(bot, { user: U.ali, total: '2000000 ریال' });
+  assert.ok(rid);
+  assert.ok(!bot.texts(U.ali).some((t) => /نام رستوران/.test(t)));
+  bot.send(U.reza, '/new');
+  assert.match(bot.last(U.reza), /مرحله ۱ از ۸/);
 });
